@@ -12,9 +12,11 @@ cd ~/smartcity-roboter
 scripts/installieren.sh
 ```
 
-`installieren.sh` legt das Desktop-Symbol **SmartCity Panel** an, fragt nach dem Roboter-Namen (RM01–RM04) und bietet an, onnxruntime für die KI zu installieren. An Yahboom-Dateien und am Autostart ändert es nichts.
+`installieren.sh` **am Roboter-Bildschirm** (nicht über SSH) ausführen. Es legt **SmartCity Panel** auf dem Desktop und im Programm-Menü an (Super-Taste, "SmartCity" tippen), fragt nach dem Roboter-Namen (RM01–RM04) und bietet an, onnxruntime für die KI zu installieren. An Yahboom-Dateien und am Autostart ändert es nichts.
 
 ## Benutzen: Doppelklick auf "SmartCity Panel"
+
+Meldet Ubuntu "nicht vertrauenswürdig": Rechtsklick auf das Symbol → "Start erlauben". Fehlt der Eintrag, `installieren.sh` im Terminal am Roboter-Bildschirm erneut ausführen oder das Panel über das Programm-Menü starten.
 
 Startet Kamera, KI-Erkennung und das Control-Panel im Vollbild. **Fenster schließen = Roboter hält an, alles wird beendet.**
 
