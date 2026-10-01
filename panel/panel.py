@@ -1,22 +1,27 @@
 #!/usr/bin/env python3
 # Control-Panel fuer den Roboter: Webseite mit grossen Knoepfen.
-# Start: scripts/panel.sh  (oeffnet die Seite im Vollbild auf dem Roboter-Display)
+# Start: scripts/panel.sh  (startet Kamera + KI und oeffnet die Seite im Vollbild)
 #
-# Standard: nur auf dem Roboter selbst erreichbar (127.0.0.1).
-# Mit --netz auch vom Laptop:  http://<IP-des-Roboters>:8080
-#   ACHTUNG: dann kann JEDER im Netz den Roboter starten.
+# Erreichbar:
+#   am Roboter selbst:  http://localhost:8080
+#   vom Laptop:         http://<IP-des-Roboters>:8080   -> erst im Panel unter "System"
+#                       "Laptop-Zugriff erlauben" einschalten (oder Start mit --netz).
+#                       Die aktuelle IP zeigt das Panel selbst an.
+#   ACHTUNG: Mit Laptop-Zugriff kann jeder im Netz, der die Adresse kennt, den Roboter starten.
 #
 # Was das Panel tut:
-#   Start/Test/Stopp  -> startet/beendet line_follower.py als eigenen Prozess
-#   Stopp             -> beendet den Prozess UND sendet sofort "Stillstand" an /cmd_vel
-#   Ansichten         -> Kamera, KI-Erkennung, LiDAR, Tiefenkamera als Live-Bild (MJPEG)
-# Der Greifarm wird hier NICHT bewegt (siehe docs/greifarm.md).
+#   START/TEST/STOPP -> startet/beendet den Linienfolger (KI-Zentrale muss laufen)
+#   STOPP            -> sendet sofort Stillstand an /cmd_vel UND beendet den Linienfolger
+#   Ansichten        -> KI-Sicht, Linie, LiDAR, Tiefe (Bild fuer Bild, ohne Stau)
+#   Arm              -> nur auf Knopfdruck, nie waehrend der Fahrt
 import argparse
 import json
-import math
 import os
+import re
 import signal
+import socket
 import subprocess
+import sys
 import threading
 import time
 from collections import deque
@@ -25,62 +30,95 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import cv2
 import numpy as np
 import rclpy
+from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image, CompressedImage, LaserScan
 from geometry_msgs.msg import Twist
-from std_msgs.msg import String
+from std_msgs.msg import String, Float32
 from cv_bridge import CvBridge
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 HIER = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(REPO, 'lib'))
+sys.path.insert(0, os.path.join(REPO, 'ki'))
+import lidar           # noqa: E402
+import arm as armlib   # noqa: E402
+from entscheider import STANDARD as KI_STANDARD  # noqa: E402
 
-# Szenarien: Name -> Beschreibung + ROS-Parameter fuer den Linienfolger.
-# Neue Szenarien einfach hier ergaenzen.
+ROBOTER_YAML = os.path.join(REPO, 'config', 'roboter.yaml')
+
+# Szenarien: Name -> Beschreibung + was an KI und Linienfolger geht. Neue einfach ergaenzen.
 SZENARIEN = {
-    'normal': {'titel': 'Normal', 'text': 'Faehrt der Linie nach, haelt bei Rot, Stoppschild und Hindernis.',
-               'params': {'szenario': 'normal'}},
-    'einsatz': {'titel': 'RTW-Einsatz', 'text': 'Einsatzfahrt: darf bei Rot und am Stoppschild weiterfahren, '
-                'etwas schneller. Notbremse bei Hindernis bleibt AN.',
-                'params': {'szenario': 'einsatz'}},
-    'langsam': {'titel': 'Langsam', 'text': 'Wie Normal, aber halbe Geschwindigkeit (zum Testen).',
-                'params': {'szenario': 'normal', 'speed': 0.04}},
+    'normal': {'titel': 'Normal', 'text': 'Haelt bei Rot, am Stoppschild und vor Hindernissen.',
+               'ki': 'normal'},
+    'einsatz': {'titel': 'RTW-Einsatz', 'text': 'Sonderrechte: faehrt bei Rot und am Stoppschild weiter, '
+                'etwas schneller. Vor Hindernissen haelt er trotzdem.', 'ki': 'einsatz'},
 }
 
-
 # Sensoren fuer die Statusseite: (Anzeigename, Topic, Mindestrate in Hz oder None = nur Info)
-def sensorliste(args):
-    return [
-        ('Akku', '/battery', 0.5),
-        ('IMU (Lagesensor)', '/imu/data_raw', 5),
-        ('Odometrie (Radzaehler)', '/odom_raw', 5),
-        ('LiDAR scan0', '/scan0', 3),
-        ('LiDAR scan1', '/scan1', 3),
-        ('Kamera Farbe', args.kamera_topic, 5),
-        ('Kamera Tiefe', args.tiefe_topic, 5),
-        ('Gamepad', '/joy', None),
-    ]
-
-
+SENSOREN = [
+    ('Akku', '/battery', 0.5),
+    ('IMU (Lagesensor)', '/imu/data_raw', 5),
+    ('Odometrie (Radzaehler)', '/odom_raw', 5),
+    ('LiDAR scan0', '/scan0', 3),
+    ('LiDAR scan1', '/scan1', 3),
+    ('Kamera Farbe', '/camera/color/camera_info', 5),
+    ('Kamera Tiefe', '/camera/depth/camera_info', 5),
+    ('Gamepad', '/joy', None),
+]
 # Akku: 3 Li-Ion-Zellen (voll ca. 12,6 V). Prozent ist nur eine grobe SCHAETZUNG.
 AKKU_VOLL, AKKU_LEER, AKKU_WARNUNG = 12.6, 10.5, 11.0
 
 
-def lade_roboter_yaml():
+def lade_lidar_einstellungen():
     try:
         import yaml
-        with open(os.path.join(REPO, 'config', 'roboter.yaml')) as f:
-            return yaml.safe_load(f)['line_follower']['ros__parameters']
+        with open(ROBOTER_YAML) as f:
+            daten = yaml.safe_load(f) or {}
+        p = dict((daten.get('/**') or {}).get('ros__parameters', {}))
+        p.update((daten.get('line_follower') or {}).get('ros__parameters', {}))
+        return p
     except Exception:
         return {}
+
+
+def speichere_lidar_winkel(winkel):
+    """Schreibt scan_front_deg in config/roboter.yaml (Kommentare bleiben erhalten)."""
+    with open(ROBOTER_YAML) as f:
+        text = f.read()
+    neu = '[' + ', '.join(f'{float(w):.1f}' for w in winkel) + ']'
+    text, n = re.subn(r'(scan_front_deg:\s*)\[[^\]]*\]', lambda m: m.group(1) + neu, text)
+    if n == 0:
+        raise ValueError('scan_front_deg nicht in config/roboter.yaml gefunden')
+    with open(ROBOTER_YAML, 'w') as f:
+        f.write(text)
+
+
+def ip_adressen():
+    """Aktuelle IPv4-Adressen des Roboters (ohne 127.x). Aendert sich z. B. mit den VLANs."""
+    ips = []
+    try:
+        aus = subprocess.run(['hostname', '-I'], capture_output=True, text=True, timeout=3).stdout
+        ips = [a for a in aus.split() if re.fullmatch(r'\d+\.\d+\.\d+\.\d+', a) and not a.startswith('127.')]
+    except Exception:
+        pass
+    if not ips:
+        try:  # Ersatz: welche Adresse wuerde fuer Verbindungen nach aussen benutzt?
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(('10.255.255.255', 1))
+            ips = [s.getsockname()[0]]
+            s.close()
+        except Exception:
+            pass
+    return ips
 
 
 class Prozesse:
     """Startet und beendet Programme (Linienfolger, Kamera, KI) als Kindprozesse."""
 
     def __init__(self):
-        self.p = {}
-        self.info = {}
+        self.p, self.info = {}, {}
 
     def laeuft(self, name):
         pr = self.p.get(name)
@@ -118,43 +156,63 @@ class PanelNode(Node):
         self.args = args
         self.bridge = CvBridge()
         self.lock = threading.Lock()
-        self.kamera = (0.0, None)       # (zeit, ROS-Bild)
-        self.lf_bild = (0.0, None)      # (zeit, jpeg bytes) vom Linienfolger
-        self.ki_bild = (0.0, None)
-        self.tiefe = (0.0, None)
+        self.daten = {}                 # name -> (zeit, wert)
         self.scans = {}                 # topic -> (zeit, msg)
-        self.lf_status = (0.0, {})
-        self.ki_objekte = (0.0, [])
-        self.akku = (0.0, None)
-        self.zaehler = {}               # topic -> Zeitpunkte der letzten Nachrichten (fuer Hz)
-        self.sensoren = sensorliste(args)
-        self.agent = (0.0, False)
+        self.ereignisse = deque(maxlen=40)
+        self.zaehler = {}               # topic -> Zeitpunkte (fuer Hz)
+        self.netz_erlaubt = args.netz
+        cfg = lade_lidar_einstellungen()
+        self.scan_topics = list(cfg.get('scan_topics', ['/scan0', '/scan1']))
+        self.scan_front = [float(x) for x in cfg.get('scan_front_deg', [0.0] * len(self.scan_topics))]
+        self.halb_deg = float(cfg.get('obstacle_half_deg', 30.0))
+        self.notbremse = float(cfg.get('notbremse_dist', KI_STANDARD['notbremse_dist']))
+        self.arm = None
+        self.tiefe_sub, self.tiefe_gewuenscht = None, 0.0
+        self.szenario = 'normal'
+
         self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
-        self.create_subscription(Image, args.kamera_topic, lambda m: self._set('kamera', m), 1)
-        self.create_subscription(CompressedImage, '/line_follower/bild/compressed',
-                                 lambda m: self._set('lf_bild', bytes(m.data)), 1)
-        self.create_subscription(CompressedImage, '/erkennung/bild/compressed',
-                                 lambda m: self._set('ki_bild', bytes(m.data)), 1)
-        self.create_subscription(Image, args.tiefe_topic, lambda m: self._set('tiefe', m), qos_profile_sensor_data)
-        self.create_subscription(String, '/line_follower/status', lambda m: self._set('lf_status', json.loads(m.data)), 10)
-        self.create_subscription(String, '/erkennung/objekte', lambda m: self._set('ki_objekte', json.loads(m.data)), 10)
-        cfg = lade_roboter_yaml()
-        self.scan_topics = cfg.get('scan_topics', ['/scan0', '/scan1'])
-        self.scan_front = cfg.get('scan_front_deg', [0.0, 0.0])
-        self.obst_dist = cfg.get('obstacle_dist', 0.30)
-        self.obst_half = cfg.get('obstacle_half_deg', 30.0)
+        self.szenario_pub = self.create_publisher(String, '/ki/szenario', 10)
+        self.tempo_pub = self.create_publisher(Float32, '/line_follower/tempo', 10)
+        sub = self.create_subscription
+        sub(String, '/line_follower/status', lambda m: self._json('lf', m), 10)
+        sub(String, '/ki/befehl', lambda m: self._json('ki', m), 10)
+        sub(String, '/ki/ereignis', self._ereignis, 50)
+        sub(CompressedImage, '/line_follower/bild/compressed', lambda m: self._set('bild_lf', bytes(m.data)), 1)
+        sub(CompressedImage, '/ki/bild/compressed', lambda m: self._set('bild_ki', bytes(m.data)), 1)
         for t in self.scan_topics:
-            self.create_subscription(LaserScan, t, lambda m, t=t: self._scan(t, m), qos_profile_sensor_data)
+            sub(LaserScan, t, lambda m, t=t: self._scan(t, m), qos_profile_sensor_data)
         self.dyn_subs = {}
         self.create_timer(2.0, self._dynamisch_abonnieren)
         self.create_timer(3.0, self._agent_pruefen)
+        self.create_timer(0.5, self._tiefe_verwalten)
+        # Szenario jede Sekunde senden, damit es auch eine spaeter gestartete KI mitbekommt
+        self.create_timer(1.0, lambda: self.szenario_pub.publish(String(data=SZENARIEN[self.szenario]['ki'])))
 
+    # ---------------- Eingaenge ----------------
     def _set(self, name, wert):
         with self.lock:
-            setattr(self, name, (time.time(), wert))
-        zuordnung = {'kamera': self.args.kamera_topic, 'tiefe': self.args.tiefe_topic}
-        if name in zuordnung:
-            self.zaehle(zuordnung[name])
+            self.daten[name] = (time.time(), wert)
+
+    def get(self, name, max_alter=None):
+        with self.lock:
+            zeit, wert = self.daten.get(name, (0.0, None))
+        if max_alter is not None and time.time() - zeit > max_alter:
+            return None
+        return wert
+
+    def _json(self, name, msg):
+        try:
+            self._set(name, json.loads(msg.data))
+        except ValueError:
+            pass
+
+    def _ereignis(self, msg):
+        try:
+            e = json.loads(msg.data)
+        except ValueError:
+            return
+        with self.lock:
+            self.ereignisse.appendleft(e)
 
     def _scan(self, topic, msg):
         with self.lock:
@@ -162,26 +220,22 @@ class PanelNode(Node):
         self.zaehle(topic)
 
     def zaehle(self, topic):
-        jetzt = time.time()
         with self.lock:
-            d = self.zaehler.setdefault(topic, deque(maxlen=200))
-            d.append(jetzt)
+            self.zaehler.setdefault(topic, deque(maxlen=300)).append(time.time())
 
     def hz(self, topic):
         jetzt = time.time()
         with self.lock:
-            zeiten = [z for z in self.zaehler.get(topic, ()) if jetzt - z < 2.0]
-        return len(zeiten) / 2.0
+            n = sum(1 for z in self.zaehler.get(topic, ()) if jetzt - z < 2.0)
+        return n / 2.0
 
     def _dynamisch_abonnieren(self):
-        # Fuer Sensoren ohne festes Abo (Akku, IMU, Odometrie, Gamepad) den Nachrichtentyp
-        # zur Laufzeit nachsehen. So muss man den Typ nicht vorher wissen.
-        fest = set(self.scan_topics) | {self.args.kamera_topic, self.args.tiefe_topic}
+        # Nachrichtentyp zur Laufzeit nachsehen (z. B. /battery), dann muss man ihn nicht kennen.
         try:
             from rosidl_runtime_py.utilities import get_message
             typen = dict(self.get_topic_names_and_types())
-            for _, topic, _ in self.sensoren:
-                if topic in fest or topic in self.dyn_subs or not typen.get(topic):
+            for _, topic, _ in SENSOREN:
+                if topic in self.scan_topics or topic in self.dyn_subs or not typen.get(topic):
                     continue
                 typ = get_message(typen[topic][0])
                 if topic == '/battery':
@@ -192,6 +246,13 @@ class PanelNode(Node):
         except Exception as e:
             self.get_logger().warn(f'Sensor-Abo: {e}', throttle_duration_sec=30)
 
+    def _akku(self, msg):
+        wert = getattr(msg, 'data', None)
+        if wert is None:
+            wert = getattr(msg, 'voltage', None)
+        if wert is not None:
+            self._set('akku', float(wert))
+
     def _agent_pruefen(self):
         try:
             ok = subprocess.run(['pgrep', '-f', 'micro_ros_agent'], capture_output=True).returncode == 0
@@ -199,163 +260,207 @@ class PanelNode(Node):
             ok = False
         self._set('agent', ok)
 
-    def sensor_status(self):
-        liste = []
-        for name, topic, min_hz in self.sensoren:
-            hz = self.hz(topic)
-            liste.append({'name': name, 'topic': topic, 'hz': round(hz, 1),
-                          'ok': None if min_hz is None else hz >= min_hz})
-        knoten = self.get_node_names()
-        liste.insert(0, {'name': 'micro-ROS-Agent (Verbindung zum Board)', 'topic': 'Prozess',
-                         'hz': None, 'ok': self.agent[1]})
-        liste.insert(1, {'name': 'Motorboard (/YB_Node)', 'topic': 'Node', 'hz': None, 'ok': 'YB_Node' in knoten})
-        return liste
+    def _tiefe_verwalten(self):
+        # Tiefenbilder sind gross -> nur abonnieren, solange jemand die Tiefen-Ansicht offen hat
+        gewollt = time.time() - self.tiefe_gewuenscht < 5.0
+        if gewollt and self.tiefe_sub is None:
+            self.tiefe_sub = self.create_subscription(Image, self.args.tiefe_topic,
+                                                      lambda m: self._set('tiefe', m), qos_profile_sensor_data)
+        elif not gewollt and self.tiefe_sub is not None:
+            self.destroy_subscription(self.tiefe_sub)
+            self.tiefe_sub = None
 
-    def _akku(self, msg):
-        wert = getattr(msg, 'data', None)
-        if wert is None:
-            wert = getattr(msg, 'voltage', None)
-        self._set('akku', wert)
-
+    # ---------------- Ausgaenge ----------------
     def stillstand(self):
         for _ in range(5):
             self.cmd_pub.publish(Twist())
             time.sleep(0.02)
 
-    # ---------- Bilder fuer die Ansichten (JPEG) ----------
-    def jpeg_kamera(self):
-        with self.lock:
-            zeit_lf, lf = self.lf_bild
-            zeit_k, roh = self.kamera
-        if lf is not None and time.time() - zeit_lf < 1.0:
-            return lf  # Bild mit Markierungen vom Linienfolger
-        if roh is None or time.time() - zeit_k > 2.0:
-            return self._text_bild('Keine Kamerabilder. Kamera starten?')
-        img = self.bridge.imgmsg_to_cv2(roh, 'bgr8')
-        cv2.putText(img, 'Rohbild (Fahrprogramm laeuft nicht)', (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-        return cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 70])[1].tobytes()
+    def arm_holen(self):
+        if self.arm is None:
+            self.arm = armlib.Arm(self)
+        return self.arm
 
-    def jpeg_ki(self):
-        with self.lock:
-            zeit, b = self.ki_bild
-        if b is None or time.time() - zeit > 2.0:
-            return self._text_bild('KI-Erkennung laeuft nicht. Knopf "KI starten".')
-        return b
+    # ---------------- Auswertungen fuer die Webseite ----------------
+    def sensor_status(self):
+        liste = [{'name': 'micro-ROS-Agent (Verbindung zum Board)', 'topic': 'Prozess', 'hz': None,
+                  'ok': bool(self.get('agent'))},
+                 {'name': 'Motorboard (/YB_Node)', 'topic': 'Node', 'hz': None,
+                  'ok': 'YB_Node' in self.get_node_names()}]
+        for name, topic, min_hz in SENSOREN:
+            hz = self.hz(topic)
+            liste.append({'name': name, 'topic': topic, 'hz': round(hz, 1),
+                          'ok': None if min_hz is None else hz >= min_hz})
+        return liste
 
-    def jpeg_tiefe(self):
-        with self.lock:
-            zeit, roh = self.tiefe
-        if roh is None or time.time() - zeit > 2.0:
-            return self._text_bild(f'Keine Tiefenbilder auf {self.args.tiefe_topic}')
-        d = self.bridge.imgmsg_to_cv2(roh, 'passthrough').astype(np.float32)
-        if roh.encoding == '32FC1':
-            d = d * 1000.0  # Meter -> Millimeter
-        nah, fern = 150.0, 2000.0  # mm
-        norm = np.clip((d - nah) / (fern - nah), 0, 1)
-        bild = cv2.applyColorMap((255 - norm * 255).astype(np.uint8), cv2.COLORMAP_JET)
-        bild[d == 0] = 0  # kein Messwert = schwarz
-        h, w = d.shape
-        mitte = d[h // 2, w // 2]
-        cv2.drawMarker(bild, (w // 2, h // 2), (255, 255, 255), cv2.MARKER_CROSS, 20, 2)
-        cv2.putText(bild, f'Mitte: {mitte / 10:.0f} cm   rot = nah, blau = fern', (10, 25),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        return cv2.imencode('.jpg', bild, [cv2.IMWRITE_JPEG_QUALITY, 70])[1].tobytes()
-
-    def jpeg_lidar(self):
-        groesse, mpp = 600, 1 / 150.0  # 150 Pixel pro Meter -> +-2 m sichtbar
-        bild = np.full((groesse, groesse, 3), 25, np.uint8)
-        c = groesse // 2
-        for r_m in (0.5, 1.0, 1.5, 2.0):
-            cv2.circle(bild, (c, c), int(r_m / mpp), (70, 70, 70), 1)
-            cv2.putText(bild, f'{r_m:.1f} m', (c + 4, c - int(r_m / mpp) + 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (120, 120, 120), 1)
-        # Notbrems-Sektor (vorne = oben)
-        r = int(self.obst_dist / mpp)
-        cv2.ellipse(bild, (c, c), (r, r), -90, -self.obst_half, self.obst_half, (0, 0, 120), -1)
-        cv2.rectangle(bild, (c - 8, c - 12), (c + 8, c + 12), (255, 255, 255), 2)  # Roboter
-        cv2.arrowedLine(bild, (c, c), (c, c - 30), (255, 255, 255), 2, tipLength=0.4)
-        farben = [(0, 0, 255), (255, 170, 0), (0, 255, 0), (255, 0, 255)]
+    def lidar_daten(self):
         jetzt = time.time()
         with self.lock:
             scans = dict(self.scans)
-        zeile = 20
+        aus = {'scans': [], 'notbremse': self.notbremse, 'pruef': KI_STANDARD['pruef_dist'],
+               'halb_deg': self.halb_deg}
+        naechster = None
         for i, t in enumerate(self.scan_topics):
-            front = math.radians(self.scan_front[i] if i < len(self.scan_front) else 0.0)
             zeit, msg = scans.get(t, (0.0, None))
-            alt = msg is None or jetzt - zeit > 1.0
-            text = f'{t}: ' + ('keine Daten' if alt else f'{len(msg.ranges)} Punkte, vorne = {math.degrees(front):.0f} Grad')
-            cv2.putText(bild, text, (10, zeile), cv2.FONT_HERSHEY_SIMPLEX, 0.5, farben[i % 4], 1)
-            zeile += 20
-            if alt:
-                continue
-            r_arr = np.array(msg.ranges, np.float32)
-            a_arr = msg.angle_min + np.arange(len(r_arr)) * msg.angle_increment - front
-            gut = np.isfinite(r_arr) & (r_arr > msg.range_min) & (r_arr < msg.range_max)
-            x = r_arr[gut] * np.cos(a_arr[gut])   # vorne
-            y = r_arr[gut] * np.sin(a_arr[gut])   # links
-            px = (c - y / mpp).astype(int)
-            py = (c - x / mpp).astype(int)
-            innen = (px >= 0) & (px < groesse) & (py >= 0) & (py < groesse)
-            bild[py[innen], px[innen]] = farben[i % 4]
-        cv2.putText(bild, 'oben = vorne (laut config/roboter.yaml)   dunkelrot = Notbrems-Bereich',
-                    (10, groesse - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
-        return cv2.imencode('.jpg', bild, [cv2.IMWRITE_JPEG_QUALITY, 80])[1].tobytes()
+            front = self.scan_front[i] if i < len(self.scan_front) else 0.0
+            eintrag = {'topic': t, 'front_deg': front, 'aktiv': msg is not None and jetzt - zeit < 1.0, 'punkte': []}
+            if eintrag['aktiv']:
+                eintrag['punkte'] = lidar.punkte(msg, front)
+                d = lidar.naechster_vorne(msg, front, self.halb_deg)
+                if d != float('inf') and (naechster is None or d < naechster):
+                    naechster = d
+            aus['scans'].append(eintrag)
+        aus['naechster_vorne'] = naechster
+        return aus
 
-    @staticmethod
-    def _text_bild(text):
-        bild = np.full((480, 640, 3), 40, np.uint8)
-        cv2.putText(bild, text, (20, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        return cv2.imencode('.jpg', bild)[1].tobytes()
+    def jpeg_tiefe(self):
+        self.tiefe_gewuenscht = time.time()
+        roh = self.get('tiefe', max_alter=2.0)
+        if roh is None:
+            return text_bild('Tiefenkamera: warte auf Bilder ...')
+        d = self.bridge.imgmsg_to_cv2(roh, 'passthrough').astype(np.float32)
+        if roh.encoding != '32FC1':
+            d /= 1000.0  # mm -> m
+        nah, fern = 0.15, 1.5
+        norm = np.clip((d - nah) / (fern - nah), 0, 1)
+        bild = cv2.applyColorMap((255 - norm * 255).astype(np.uint8), cv2.COLORMAP_TURBO)
+        bild[d <= 0] = 0
+        h, w = d.shape
+        mitte = d[h // 2, w // 2]
+        cv2.drawMarker(bild, (w // 2, h // 2), (255, 255, 255), cv2.MARKER_CROSS, 24, 2)
+        cv2.putText(bild, f'Mitte: {mitte * 100:.0f} cm', (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+        if w > 640:
+            bild = cv2.resize(bild, (640, int(h * 640 / w)))
+        return cv2.imencode('.jpg', bild, [cv2.IMWRITE_JPEG_QUALITY, 70])[1].tobytes()
+
+
+def text_bild(text):
+    bild = np.full((360, 640, 3), (42, 30, 15), np.uint8)
+    cv2.putText(bild, text, (24, 190), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (240, 240, 240), 2)
+    return cv2.imencode('.jpg', bild)[1].tobytes()
 
 
 def topics_mit(woerter):
-    """ros2 topic list, gefiltert (fuer die Greifarm-Diagnose). Nur lesen."""
+    """ros2 topic list, gefiltert (fuer die Arm-Diagnose). Nur lesen."""
     try:
-        aus = subprocess.run(['ros2', 'topic', 'list', '-t'], capture_output=True, text=True, timeout=10).stdout
+        aus = subprocess.run(['ros2', 'topic', 'list', '-t'], capture_output=True, text=True, timeout=15).stdout
     except Exception as e:
         return str(e)
     zeilen = [z for z in aus.splitlines() if any(w in z.lower() for w in woerter)]
     return '\n'.join(zeilen) or 'keine passenden Topics gefunden'
 
 
+def param_setzen(knoten, name, wert):
+    """Parameter eines laufenden Programms aendern (im Hintergrund, Fehler egal)."""
+    def lauf():
+        subprocess.run(['ros2', 'param', 'set', knoten, name, wert], capture_output=True, timeout=20)
+    threading.Thread(target=lauf, daemon=True).start()
+
+
 def mache_handler(node, prozesse, beenden=None):
-    lf_skript = os.path.join(REPO, 'line_follower', 'line_follower.py')
+    cfg_dateien = ['--params-file', ROBOTER_YAML]
+    if os.path.exists(os.path.join(REPO, 'config', 'ampel.yaml')):
+        cfg_dateien += ['--params-file', os.path.join(REPO, 'config', 'ampel.yaml')]
+    zustand = {'tempo': 0.15}
 
-    def lf_befehl(drive, szenario):
-        cmd = ['python3', lf_skript, '--ros-args', '--params-file', os.path.join(REPO, 'config', 'roboter.yaml')]
-        ampel = os.path.join(REPO, 'config', 'ampel.yaml')
-        if os.path.exists(ampel):
-            cmd += ['--params-file', ampel]
-        cmd += ['-p', f'drive:={"true" if drive else "false"}', '-p', 'show:=false']
-        for k, v in SZENARIEN[szenario]['params'].items():
-            cmd += ['-p', f'{k}:={v}']
-        return cmd
+    def ki_starten():
+        return prozesse.start('ki', [sys.executable, os.path.join(REPO, 'ki', 'zentrale.py'), '--ros-args'] + cfg_dateien)
 
-    def aktion(name, daten):
+    def lf_befehl(drive):
+        return [sys.executable, os.path.join(REPO, 'line_follower', 'line_follower.py'), '--ros-args'] + cfg_dateien + [
+            '-p', f'drive:={"true" if drive else "false"}', '-p', 'show:=false', '-p', f"speed:={zustand['tempo']}"]
+
+    def aktion(name, daten, lokal):
         if name == 'stopp':
             node.stillstand()                 # sofort Stillstand senden ...
             prozesse.stopp('fahren')          # ... dann Programm beenden
             node.stillstand()
             return 'Gestoppt'
         if name in ('start', 'test'):
-            sz = daten.get('szenario', 'normal')
+            if prozesse.laeuft('fahren'):
+                return 'Laeuft schon. Erst STOPP druecken.'
+            if node.get('ki', max_alter=2.0) is None:
+                ki_starten()
+                hinweis = ' KI-Zentrale wird gestartet (ca. 5 s), bis dahin bleibt er stehen.'
+            else:
+                hinweis = ''
+            node.szenario_pub.publish(String(data=SZENARIEN[node.szenario]['ki']))
+            prozesse.start('fahren', lf_befehl(name == 'start'), 'FAEHRT' if name == 'start' else 'TESTMODUS')
+            return ('Faehrt los.' if name == 'start' else 'Testmodus: zeigt alles, faehrt nicht.') + hinweis
+        if name == 'szenario':
+            sz = daten.get('szenario')
             if sz not in SZENARIEN:
                 return f'Unbekanntes Szenario {sz}'
-            if prozesse.laeuft('fahren'):
-                return 'Laeuft schon. Erst Stopp druecken.'
-            prozesse.start('fahren', lf_befehl(name == 'start', sz),
-                           f"{'FAEHRT' if name == 'start' else 'TESTMODUS'} - {SZENARIEN[sz]['titel']}")
-            return 'Gestartet'
+            node.szenario = sz
+            node.szenario_pub.publish(String(data=SZENARIEN[sz]['ki']))
+            return f"Szenario: {SZENARIEN[sz]['titel']}"
+        if name == 'tempo':
+            zustand['tempo'] = max(0.05, min(0.4, float(daten.get('wert', 0.15))))
+            node.tempo_pub.publish(Float32(data=zustand['tempo']))
+            return f"Tempo {zustand['tempo']:.2f} m/s"
         if name == 'kamera_start':
-            if node.count_publishers(node.args.kamera_topic) > 0:
+            if node.count_publishers('/camera/color/image_raw') > 0:
                 return 'Kamera laeuft schon'
             prozesse.start('kamera', ['bash', os.path.join(REPO, 'scripts', 'kamera.sh')])
             return 'Kamera wird gestartet (ca. 10 s)'
         if name == 'ki_start':
-            prozesse.start('ki', ['python3', os.path.join(REPO, 'erkennung', 'objekte.py')])
-            return 'KI wird gestartet. Log: /tmp/panel_ki.log'
+            return 'KI wird gestartet. Log: /tmp/panel_ki.log' if ki_starten() else 'KI laeuft schon'
         if name == 'ki_stopp':
             prozesse.stopp('ki')
-            return 'KI gestoppt'
+            return 'KI gestoppt (Fahrprogramm haelt dann an)'
+        # ---- Arm ----
+        if name.startswith('arm_'):
+            if prozesse.laeuft('fahren') and name in ('arm_pose', 'arm_greifer'):
+                return 'Arm nur, wenn das Fahrprogramm aus ist (Kamera sitzt am Arm). Erst STOPP.'
+            if name == 'arm_pose':
+                fehler = node.arm_holen().fahre(daten.get('winkel', []), int(daten.get('zeit', 2000)))
+                return fehler or 'Arm faehrt (' + ('echt' if node.arm.echt else 'nur Test-Topic, arm_msgs fehlt') + ')'
+            if name == 'arm_greifer':
+                letzte = node.arm_holen().letzte or daten.get('winkel')
+                if not letzte:
+                    return 'Erst einmal eine ganze Pose schicken (der Roboter meldet die Armstellung nicht).'
+                winkel = list(letzte)
+                winkel[5] = armlib.GREIFER_AUF if daten.get('auf') else armlib.GREIFER_ZU
+                return node.arm.fahre(winkel, 800) or ('Greifer auf' if daten.get('auf') else 'Greifer zu')
+            if name == 'arm_speichern':
+                pose = daten.get('name', '')
+                if not re.fullmatch(r'[a-z0-9_]{2,30}', pose):
+                    return 'Name nur aus Kleinbuchstaben/Zahlen'
+                fehler = armlib.pruefe([int(w) for w in daten.get('winkel', [])], 1000)
+                if fehler:
+                    return fehler
+                armlib.speichere_pose(pose, daten['winkel'])
+                return f'Pose "{pose}" gespeichert (config/arm.yaml). KI neu starten, damit sie sie kennt.'
+            if name == 'arm_ki':
+                einst = armlib.lade_einstellungen()
+                posen = einst.get('posen') or {}
+                if daten.get('erlaubt') and not (posen.get('fahrstellung') and posen.get('pruefblick')):
+                    return 'Erst die Posen "fahrstellung" und "pruefblick" speichern.'
+                einst['ki_darf_arm_bewegen'] = bool(daten.get('erlaubt'))
+                import yaml
+                with open(armlib.POSEN_DATEI, 'w') as f:
+                    yaml.safe_dump(einst, f, allow_unicode=True, sort_keys=False)
+                return 'Gespeichert. KI neu starten (KI stoppen + starten), damit es gilt.'
+            if name == 'arm_diagnose':
+                return topics_mit(['arm', 'servo', 'joint', 'grip', 'claw'])
+        # ---- LiDAR ----
+        if name == 'lidar_winkel':
+            i, grad = int(daten.get('index', 0)), float(daten.get('grad', 0))
+            if 0 <= i < len(node.scan_front):
+                node.scan_front[i] = ((grad + 180) % 360) - 180
+            return f"Vorne fuer {node.scan_topics[i]}: {node.scan_front[i]:.0f} Grad (noch nicht gespeichert)"
+        if name == 'lidar_speichern':
+            speichere_lidar_winkel(node.scan_front)
+            wert = '[' + ', '.join(f'{w:.1f}' for w in node.scan_front) + ']'
+            param_setzen('/ki_zentrale', 'scan_front_deg', wert)
+            param_setzen('/line_follower', 'scan_front_deg', wert)
+            return 'Gespeichert in config/roboter.yaml und an KI + Linienfolger geschickt.'
+        # ---- System ----
+        if name == 'netz':
+            if not lokal:
+                return 'Laptop-Zugriff kann nur am Roboter selbst umgeschaltet werden.'
+            node.netz_erlaubt = bool(daten.get('erlaubt'))
+            return 'Laptop-Zugriff ' + ('AN' if node.netz_erlaubt else 'AUS')
         if name == 'update':
             if prozesse.laeuft('fahren'):
                 return 'Erst STOPP druecken.'
@@ -363,37 +468,37 @@ def mache_handler(node, prozesse, beenden=None):
             return (r.stdout + r.stderr).strip() + '\nPanel neu starten, damit Aenderungen gelten.'
         if name == 'beenden' and beenden:
             threading.Thread(target=beenden, daemon=True).start()
-            return 'Panel wird beendet'
-        if name == 'arm_diagnose':
-            return topics_mit(['arm', 'servo', 'joint', 'grip', 'claw'])
+            return 'Panel wird beendet, Roboter haelt an.'
         return f'Unbekannte Aktion {name}'
 
-    def status():
-        jetzt = time.time()
-        with node.lock:
-            zs, st = node.lf_status
-            za, akku = node.akku
-            zo, obj = node.ki_objekte
-            zk = node.kamera[0]
-            scans = {t: jetzt - z < 1.0 for t, (z, _) in node.scans.items()}
+    def status(lokal):
+        akku = node.get('akku', max_alter=5.0)
+        posen = armlib.lade_posen()
         return {
-            'fahren': prozesse.laeuft('fahren'), 'fahren_info': prozesse.info.get('fahren', ''),
-            'ki': prozesse.laeuft('ki'),
-            'status': st.get('status', '') if jetzt - zs < 1.5 else '',
-            'akku': akku if jetzt - za < 5 else None,
-            'akku_prozent': None if akku is None or jetzt - za >= 5 else
+            'fahren': prozesse.laeuft('fahren'), 'modus': prozesse.info.get('fahren', ''),
+            'ki_prozess': prozesse.laeuft('ki'),
+            'lf': node.get('lf', max_alter=1.5), 'ki': node.get('ki', max_alter=1.5),
+            'ereignisse': list(node.ereignisse)[:25],
+            'akku': akku, 'akku_warnung': AKKU_WARNUNG,
+            'akku_prozent': None if akku is None else
             max(0, min(100, round((akku - AKKU_LEER) / (AKKU_VOLL - AKKU_LEER) * 100))),
-            'akku_warnung': AKKU_WARNUNG,
             'sensoren': node.sensor_status(),
-            'kamera': jetzt - zk < 2.0,
-            'lidar': scans,
-            'objekte': obj if jetzt - zo < 2.0 else [],
             'szenarien': {k: {'titel': v['titel'], 'text': v['text']} for k, v in SZENARIEN.items()},
+            'szenario': node.szenario, 'tempo': zustand['tempo'],
+            'ips': ip_adressen(), 'port': node.args.port, 'netz_erlaubt': node.netz_erlaubt, 'lokal': lokal,
+            'roboter': open(os.path.expanduser('~/roboter_name')).read().strip()
+            if os.path.exists(os.path.expanduser('~/roboter_name')) else '',
+            'arm': {'grenzen': armlib.GRENZEN, 'namen': armlib.NAMEN, 'posen': posen,
+                    'letzte': node.arm.letzte if node.arm else None,
+                    'ki_darf': bool(armlib.lade_einstellungen().get('ki_darf_arm_bewegen'))},
         }
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):
             pass  # keine Zeile pro Anfrage ins Terminal
+
+        def _lokal(self):
+            return self.client_address[0] in ('127.0.0.1', '::1', '::ffff:127.0.0.1')
 
         def _senden(self, code, typ, daten):
             self.send_response(code)
@@ -402,32 +507,42 @@ def mache_handler(node, prozesse, beenden=None):
             self.end_headers()
             self.wfile.write(daten)
 
+        def _erlaubt(self):
+            if self._lokal() or node.netz_erlaubt:
+                return True
+            self._senden(403, 'text/html; charset=utf-8', (
+                '<h1 style="font-family:sans-serif">Laptop-Zugriff ist aus</h1>'
+                '<p style="font-family:sans-serif">Am Roboter im Panel unter <b>System</b> '
+                '"Laptop-Zugriff erlauben" einschalten, dann diese Seite neu laden.</p>').encode())
+            return False
+
         def do_GET(self):
-            if self.path in ('/', '/index.html'):
-                with open(os.path.join(HIER, 'index.html'), 'rb') as f:
-                    self._senden(200, 'text/html; charset=utf-8', f.read())
-            elif self.path == '/api/status':
-                self._senden(200, 'application/json', json.dumps(status()).encode())
-            elif self.path.startswith('/stream/'):
-                quelle = {'kamera': node.jpeg_kamera, 'ki': node.jpeg_ki, 'lidar': node.jpeg_lidar,
-                          'tiefe': node.jpeg_tiefe}.get(self.path.split('/')[2].split('?')[0])
-                if quelle is None:
-                    return self._senden(404, 'text/plain', b'?')
-                # MJPEG: ein "Video" aus vielen JPEG-Bildern hintereinander
-                self.send_response(200)
-                self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=bild')
-                self.end_headers()
-                try:
-                    while True:
-                        jpg = quelle()
-                        self.wfile.write(b'--bild\r\nContent-Type: image/jpeg\r\n\r\n' + jpg + b'\r\n')
-                        time.sleep(0.1)
-                except (BrokenPipeError, ConnectionResetError):
-                    pass
-            else:
-                self._senden(404, 'text/plain', b'Nicht gefunden')
+            if not self._erlaubt():
+                return
+            pfad = self.path.split('?')[0]
+            try:
+                if pfad in ('/', '/index.html'):
+                    with open(os.path.join(HIER, 'index.html'), 'rb') as f:
+                        self._senden(200, 'text/html; charset=utf-8', f.read())
+                elif pfad == '/api/status':
+                    self._senden(200, 'application/json', json.dumps(status(self._lokal())).encode())
+                elif pfad == '/api/lidar':
+                    self._senden(200, 'application/json', json.dumps(node.lidar_daten()).encode())
+                elif pfad in ('/bild/ki.jpg', '/bild/linie.jpg'):
+                    b = node.get('bild_ki' if 'ki' in pfad else 'bild_lf', max_alter=2.0)
+                    if b is None:
+                        b = text_bild('KI-Zentrale laeuft nicht' if 'ki' in pfad else 'Linienfolger laeuft nicht (START/TEST)')
+                    self._senden(200, 'image/jpeg', b)
+                elif pfad == '/bild/tiefe.jpg':
+                    self._senden(200, 'image/jpeg', node.jpeg_tiefe())
+                else:
+                    self._senden(404, 'text/plain', b'Nicht gefunden')
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
         def do_POST(self):
+            if not self._erlaubt():
+                return
             if not self.path.startswith('/api/'):
                 return self._senden(404, 'text/plain', b'?')
             laenge = int(self.headers.get('Content-Length', 0))
@@ -435,44 +550,54 @@ def mache_handler(node, prozesse, beenden=None):
                 daten = json.loads(self.rfile.read(laenge) or b'{}')
             except ValueError:
                 daten = {}
-            antwort = aktion(self.path[5:], daten)
+            try:
+                antwort = aktion(self.path[5:], daten, self._lokal())
+            except Exception as e:  # Fehler anzeigen statt das Panel abstuerzen zu lassen
+                antwort = f'Fehler: {e}'
             self._senden(200, 'application/json', json.dumps({'antwort': antwort}).encode())
 
-    return Handler
+    return Handler, ki_starten
 
 
 def main():
     ap = argparse.ArgumentParser(description='Control-Panel')
     ap.add_argument('--port', type=int, default=8080)
-    ap.add_argument('--netz', action='store_true', help='auch aus dem Netzwerk erreichbar (Vorsicht!)')
-    ap.add_argument('--kamera-topic', default='/camera/color/image_raw')
+    ap.add_argument('--netz', action='store_true', help='Laptop-Zugriff gleich beim Start erlauben (Vorsicht!)')
     ap.add_argument('--tiefe-topic', default='/camera/depth/image_raw')
-    ap.add_argument('--autostart', action='store_true', help='Kamera und KI beim Start mitstarten')
+    ap.add_argument('--autostart', action='store_true', help='Kamera und KI-Zentrale beim Start mitstarten')
     args, _ = ap.parse_known_args()
 
     rclpy.init()
     node = PanelNode(args)
     prozesse = Prozesse()
-    threading.Thread(target=rclpy.spin, args=(node,), daemon=True).start()
-    adresse = '0.0.0.0' if args.netz else '127.0.0.1'
+    executor = SingleThreadedExecutor()
+    executor.add_node(node)
+    threading.Thread(target=executor.spin, daemon=True).start()
     server = None
 
     def beenden():
         time.sleep(0.3)
         server.shutdown()
-    server = ThreadingHTTPServer((adresse, args.port), mache_handler(node, prozesse, beenden))
+    handler, ki_starten = mache_handler(node, prozesse, beenden)
+    server = ThreadingHTTPServer(('0.0.0.0', args.port), handler)
     server.daemon_threads = True
-    print(f'Control-Panel: http://{"<IP-des-Roboters>" if args.netz else "localhost"}:{args.port}  (Strg+C = Ende)')
-    if args.netz:
-        print('ACHTUNG: Panel ist im ganzen Netz erreichbar. Jeder kann den Roboter starten.')
+    print(f'Control-Panel am Roboter:  http://localhost:{args.port}')
+    for ip in ip_adressen():
+        print(f'Vom Laptop (Laptop-Zugriff im Panel erlauben):  http://{ip}:{args.port}')
+    # Auch bei "Beenden"-Signalen (Fenster zu, Herunterfahren) sauber aufraeumen,
+    # sonst laufen KI und Linienfolger ohne Panel weiter.
+    def signal_ende(*_):
+        raise KeyboardInterrupt
+    # SIGINT auch ausdruecklich: Mit '&' aus einem Skript gestartete Programme ignorieren es sonst.
+    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, signal_ende)
     if args.autostart:
-        time.sleep(2.0)  # kurz warten, bis ROS die anderen Nodes kennt
-        if node.count_publishers(args.kamera_topic) == 0:
+        time.sleep(2.0)  # kurz warten, bis ROS die anderen Programme kennt
+        if node.count_publishers('/camera/color/image_raw') == 0:
             print('Starte Kamera ...')
             prozesse.start('kamera', ['bash', os.path.join(REPO, 'scripts', 'kamera.sh')])
-        if os.path.exists(os.path.join(REPO, 'models', 'yolov8n.onnx')):
-            print('Starte KI-Erkennung ...')
-            prozesse.start('ki', ['python3', os.path.join(REPO, 'erkennung', 'objekte.py')])
+        print('Starte KI-Zentrale ...')
+        ki_starten()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -483,11 +608,16 @@ def main():
         prozesse.alle_stoppen()
         node.stillstand()
         server.server_close()
+        executor.shutdown(timeout_sec=2.0)  # ROS-Teil zuerst anhalten, sonst Absturz beim Abbau
         node.destroy_node()
         try:
             rclpy.shutdown()
         except Exception:
             pass
+        print('Panel beendet, Roboter angehalten.', flush=True)
+        # Direkt beenden: ein ROS-Hintergrundthread stuerzt sonst beim Python-Ende ab ("Aborted").
+        # Alles Wichtige (Stillstand, Programme beenden) ist an dieser Stelle schon erledigt.
+        os._exit(0)
 
 
 if __name__ == '__main__':

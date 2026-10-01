@@ -74,3 +74,4 @@ else
         pip3 install --user "onnxruntime<1.20" "numpy<2"
     fi
 fi
+echo; echo "Anzeige fuer das Panel (Chromium geht auf dem Jetson oft nicht): scripts/browser_installieren.sh"

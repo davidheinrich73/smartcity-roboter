@@ -3,222 +3,599 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Roboter-Panel</title>
+<title>SmartCity Roboter</title>
 <style>
-  :root { --bg: #111; --karte: #1e1e1e; --text: #eee; --grau: #888; --gruen: #1f9d55; --rot: #d42a2a; --blau: #2a6fd4; --gelb: #d4a72a; }
+  :root {
+    --bg: #0b1220; --karte: #131c2e; --karte2: #19243a; --rand: #24324d; --text: #e6edf7; --grau: #8da2c0;
+    --gruen: #22c55e; --gelb: #f5b301; --rot: #ef4444; --blau: #3b82f6; --lila: #a78bfa; --tuerkis: #22d3ee;
+  }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; font-size: 18px; }
-  header { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 10px 16px; background: #000; }
-  header h1 { font-size: 22px; margin: 0 12px 0 0; }
-  .chip { padding: 4px 10px; border-radius: 12px; background: #333; font-size: 15px; }
-  .chip.ok { background: #14532d; } .chip.schlecht { background: #7f1d1d; }
-  main { padding: 16px; max-width: 1200px; margin: 0 auto; }
-  .reiter { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
-  .reiter button { flex: 1 1 140px; }
-  button { font-size: 20px; padding: 16px; border: 0; border-radius: 10px; background: #333; color: var(--text); cursor: pointer; }
-  button.aktiv { background: var(--blau); }
-  button:active { transform: scale(0.98); }
-  .gross { font-size: 30px; padding: 28px; flex: 1 1 220px; font-weight: bold; }
-  .start { background: var(--gruen); } .stopp { background: var(--rot); } .test { background: var(--gelb); color: #000; }
-  .zeile { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
-  .karte { background: var(--karte); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
-  .szenario { flex: 1 1 200px; text-align: left; }
-  .szenario small { display: block; font-size: 14px; color: #ccc; margin-top: 6px; }
-  #statuszeile { font-size: 22px; font-family: monospace; min-height: 1.5em; }
-  img.ansicht { width: 100%; max-height: 70vh; object-fit: contain; background: #000; border-radius: 10px; }
-  pre { white-space: pre-wrap; background: #000; padding: 12px; border-radius: 8px; font-size: 14px; }
-  .hinweis { color: var(--grau); font-size: 15px; }
-  #nothalt { margin-left: auto; font-size: 26px; font-weight: bold; padding: 14px 40px; background: var(--rot); }
-  #akkuwarnung { background: var(--rot); color: #fff; font-size: 26px; font-weight: bold; text-align: center; padding: 12px; }
-  #akkugross { font-size: 32px; font-weight: bold; margin-bottom: 8px; }
-  .balken { height: 28px; background: #333; border-radius: 8px; overflow: hidden; }
-  #akkubalken { height: 100%; width: 0; background: var(--gruen); }
-  table { width: 100%; border-collapse: collapse; background: var(--karte); border-radius: 10px; overflow: hidden; }
-  td { padding: 12px; border-bottom: 1px solid #333; }
-  td.ok { color: #4ade80; font-weight: bold; } td.schlecht { color: #f87171; font-weight: bold; }
-  @media (max-width: 600px) { #nothalt { width: 100%; } .gross { font-size: 24px; } }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, "Segoe UI", Roboto, sans-serif; }
+  button { font: inherit; color: inherit; border: 0; border-radius: 12px; background: var(--karte2); padding: 12px 16px; cursor: pointer; }
+  button:active { transform: scale(0.97); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .08em; color: var(--grau); margin: 0 0 12px; font-weight: 600; }
+
+  /* Kopfzeile */
+  .kopf { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+          padding: 10px 16px; background: rgba(11,18,32,.95); border-bottom: 1px solid var(--rand); }
+  .marke { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 20px; }
+  .marke small { color: var(--grau); font-weight: 500; font-size: 15px; }
+  .seiten { display: flex; gap: 6px; flex-wrap: wrap; }
+  .seiten button { padding: 10px 16px; background: transparent; color: var(--grau); font-weight: 600; }
+  .seiten button.aktiv { background: var(--karte2); color: var(--text); }
+  .kopf-rechts { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+  .pille { white-space: nowrap; display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 999px; background: var(--karte2); font-weight: 600; font-size: 15px; }
+  #nothalt { background: var(--rot); font-weight: 800; font-size: 22px; padding: 12px 34px; letter-spacing: .05em; box-shadow: 0 0 0 3px #ef444455; }
+  @media (max-width: 1150px) {
+    .seiten button { padding: 8px 10px; }
+    .pille { padding: 6px 10px; font-size: 14px; }
+    #nothalt { padding: 10px 22px; font-size: 20px; }
+    .marke { font-size: 18px; }
+  }
+  @media (max-width: 640px) {
+    .kopf { padding: 8px 10px; gap: 8px; }
+    .kopf-rechts { margin-left: 0; width: 100%; flex-wrap: wrap; }
+    .kopf-rechts .pille { font-size: 13px; padding: 6px 10px; }
+    #nothalt { flex: 1 1 100%; }
+    main { padding: 10px; }
+    .karte { padding: 12px; }
+    .gedanke .aktion { font-size: 26px; } .gedanke .grund { font-size: 17px; }
+  }
+  #akkuwarnung { background: var(--rot); text-align: center; font-weight: 800; padding: 10px; font-size: 20px; }
+
+  main { padding: 16px; max-width: 1500px; margin: 0 auto; }
+  .karte { background: var(--karte); border: 1px solid var(--rand); border-radius: 16px; padding: 16px; margin-bottom: 16px; }
+  .raster { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(320px, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 1000px) { .raster { grid-template-columns: 1fr; } }
+
+  /* Gedanke = Entscheidung der KI */
+  .gedanke { display: flex; align-items: center; gap: 18px; border-width: 2px; }
+  .gedanke .kreis { flex: none; width: 74px; height: 74px; border-radius: 50%; display: grid; place-items: center; background: #33415555; }
+  .gedanke .kreis svg { width: 42px; height: 42px; }
+  .gedanke .aktion { font-size: 34px; font-weight: 800; letter-spacing: .03em; line-height: 1.1; }
+  .gedanke .grund { font-size: 20px; margin-top: 4px; }
+  .gedanke .meta { color: var(--grau); font-size: 14px; margin-top: 6px; }
+  .gedanke.fahren { border-color: var(--gruen); } .gedanke.fahren .kreis { background: #22c55e33; color: var(--gruen); } .gedanke.fahren .aktion { color: var(--gruen); }
+  .gedanke.langsam { border-color: var(--gelb); } .gedanke.langsam .kreis { background: #f5b30133; color: var(--gelb); } .gedanke.langsam .aktion { color: var(--gelb); }
+  .gedanke.stopp { border-color: var(--rot); } .gedanke.stopp .kreis { background: #ef444433; color: var(--rot); } .gedanke.stopp .aktion { color: var(--rot); }
+
+  /* Live-Ansicht */
+  .reiter { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+  .reiter button { flex: 1 1 120px; font-weight: 600; }
+  .reiter button.aktiv { background: var(--blau); }
+  .bildflaeche { position: relative; background: #000; border-radius: 12px; overflow: hidden; aspect-ratio: 4 / 3; max-height: 62vh; width: 100%; display: grid; place-items: center; }
+  .bildflaeche img, .bildflaeche canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .hinweis { color: var(--grau); font-size: 14px; line-height: 1.45; margin: 10px 2px 0; }
+  .lidar-regler { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+  .lidar-regler .gruppe { display: flex; gap: 6px; align-items: center; background: var(--karte2); border-radius: 12px; padding: 4px 4px 4px 12px; }
+  .lidar-regler .gruppe button { background: #2a3a5a; padding: 8px 12px; }
+
+  /* Steuerung */
+  .segmente { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+  .segmente button { text-align: left; padding: 12px; border: 2px solid transparent; }
+  .segmente button b { display: block; font-size: 17px; }
+  .segmente button small { display: block; color: var(--grau); font-size: 13px; margin-top: 4px; line-height: 1.3; }
+  .segmente button.aktiv { border-color: var(--blau); background: #1d3159; }
+  .tempo { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .tempo input { flex: 1; accent-color: var(--blau); height: 28px; }
+  .tempo b { min-width: 92px; text-align: right; font-variant-numeric: tabular-nums; }
+  .knoepfe { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .knoepfe button { font-size: 20px; font-weight: 800; padding: 20px 8px; }
+  .k-start { background: var(--gruen); color: #04220f; } .k-test { background: var(--gelb); color: #2a1d00; } .k-stopp { background: var(--rot); }
+  #antwort { color: var(--grau); font-size: 14px; min-height: 1.4em; margin-top: 10px; white-space: pre-wrap; }
+
+  /* Sinne */
+  .sinne { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .sinn { background: var(--karte2); border-radius: 12px; padding: 12px; border: 2px solid transparent; min-height: 92px; }
+  .sinn .titel { color: var(--grau); font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+  .sinn .wert { font-size: 20px; font-weight: 700; margin-top: 6px; }
+  .sinn .klein { color: var(--grau); font-size: 13px; margin-top: 4px; }
+  .sinn.alarm { border-color: var(--rot); } .sinn.achtung { border-color: var(--gelb); } .sinn.gut { border-color: #22c55e66; }
+  .sinn.breit { grid-column: 1 / -1; }
+  .ampel { display: inline-flex; gap: 6px; padding: 6px 8px; background: #05080f; border-radius: 10px; margin-top: 6px; }
+  .ampel i { width: 22px; height: 22px; border-radius: 50%; background: #222a38; display: block; }
+  .ampel i.an.g { background: var(--gruen); box-shadow: 0 0 12px var(--gruen); }
+  .ampel i.an.y { background: var(--gelb); box-shadow: 0 0 12px var(--gelb); }
+  .ampel i.an.r { background: var(--rot); box-shadow: 0 0 12px var(--rot); }
+  .balken { height: 10px; background: #0b1220; border-radius: 6px; overflow: hidden; margin-top: 8px; }
+  .balken div { height: 100%; width: 0; background: var(--tuerkis); transition: width .2s; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .chip { padding: 4px 10px; border-radius: 999px; background: #0b1220; font-size: 14px; }
+  .chip.weg { background: var(--rot); font-weight: 700; }
+
+  /* Ereignisse */
+  .ereignisse { list-style: none; margin: 0; padding: 0; max-height: 300px; overflow: auto; }
+  .ereignisse li { display: flex; gap: 10px; padding: 8px 4px; border-bottom: 1px solid var(--rand); font-size: 15px; }
+  .ereignisse time { color: var(--grau); font-variant-numeric: tabular-nums; flex: none; }
+  .ereignisse .punkt { flex: none; width: 10px; height: 10px; border-radius: 50%; margin-top: 6px; background: var(--blau); }
+  .ereignisse .stopp .punkt { background: var(--rot); } .ereignisse .langsam .punkt { background: var(--gelb); } .ereignisse .fahren .punkt { background: var(--gruen); }
+
+  /* Arm */
+  .servo { display: grid; grid-template-columns: 230px 1fr 64px; gap: 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--rand); }
+  .servo input { width: 100%; accent-color: var(--lila); height: 28px; }
+  .servo b { text-align: right; font-variant-numeric: tabular-nums; }
+  @media (max-width: 1150px) {
+    .seiten button { padding: 8px 10px; }
+    .pille { padding: 6px 10px; font-size: 14px; }
+    #nothalt { padding: 10px 22px; font-size: 20px; }
+    .marke { font-size: 18px; }
+  }
+  @media (max-width: 640px) { .servo { grid-template-columns: 1fr 56px; } .servo input { grid-column: 1 / -1; } }
+  .zeile { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center; }
+  .warnkasten { background: #f5b30122; border: 1px solid var(--gelb); border-radius: 12px; padding: 12px; margin-bottom: 12px; line-height: 1.45; }
+  pre { white-space: pre-wrap; background: #05080f; padding: 12px; border-radius: 10px; font-size: 13px; }
+
+  /* Sensoren */
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 12px 8px; border-bottom: 1px solid var(--rand); }
+  td.ok { color: var(--gruen); font-weight: 700; } td.schlecht { color: var(--rot); font-weight: 700; }
+  .akkugross { font-size: 30px; font-weight: 800; }
+  .akkubalken { height: 26px; background: #0b1220; border-radius: 8px; overflow: hidden; margin-top: 10px; }
+  .akkubalken div { height: 100%; width: 0; }
+
+  /* System */
+  .adresse { font-size: 26px; font-weight: 800; font-family: ui-monospace, monospace; background: #05080f; padding: 12px 16px; border-radius: 12px; display: inline-block; margin: 6px 0; user-select: all; }
+  .schalter { display: flex; align-items: center; gap: 12px; font-size: 18px; }
+  .schalter input { width: 28px; height: 28px; accent-color: var(--blau); }
 </style>
 </head>
 <body>
-<header>
-  <h1>SmartCity Roboter</h1>
-  <span class="chip" id="c-fahren">Fahrprogramm: ?</span>
-  <span class="chip" id="c-akku">Akku: ?</span>
-  <span class="chip" id="c-kamera">Kamera: ?</span>
-  <span class="chip" id="c-lidar">LiDAR: ?</span>
-  <span class="chip" id="c-sensoren">Sensoren: ?</span>
-  <span class="chip" id="c-ki">KI: ?</span>
-  <button id="nothalt" onclick="aktion('stopp')">STOPP</button>
+<header class="kopf">
+  <div class="marke">
+    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="8" width="16" height="10" rx="3"/><circle cx="9" cy="13" r="1.5"/><circle cx="15" cy="13" r="1.5"/><path d="M12 4v4M7 18v2M17 18v2"/></svg>
+    SmartCity <small id="roboter"></small>
+  </div>
+  <nav class="seiten">
+    <button data-seite="cockpit" class="aktiv">Cockpit</button>
+    <button data-seite="arm">Arm</button>
+    <button data-seite="sensoren">Sensoren</button>
+    <button data-seite="system">System</button>
+  </nav>
+  <div class="kopf-rechts">
+    <span class="pille" id="p-netz" title="Adresse fuer den Laptop">IP: ...</span>
+    <span class="pille" id="p-akku">
+      <svg width="28" height="16" viewBox="0 0 28 16"><rect x="1" y="1" width="23" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><rect x="25" y="5" width="2.5" height="6" rx="1" fill="currentColor"/><rect id="akku-fuell" x="3" y="3" width="0" height="10" rx="1.5" fill="var(--gruen)"/></svg>
+      <span id="akku-text">?</span>
+    </span>
+    <button id="nothalt" onclick="aktion('stopp')">STOPP</button>
+  </div>
 </header>
 <div id="akkuwarnung" hidden>AKKU SCHWACH - Roboter laden!</div>
+
 <main>
-  <div class="reiter">
-    <button data-seite="fahren" class="aktiv">Fahren</button>
-    <button data-seite="sensoren">Sensoren</button>
-    <button data-seite="kamera">Kamera</button>
-    <button data-seite="ki">KI-Erkennung</button>
-    <button data-seite="lidar">LiDAR</button>
-    <button data-seite="tiefe">Tiefe</button>
-    <button data-seite="arm">Greifarm</button>
+<!-- ============ COCKPIT ============ -->
+<section id="s-cockpit">
+  <div class="raster">
+    <div>
+      <div class="karte gedanke stopp" id="gedanke">
+        <div class="kreis" id="g-icon"></div>
+        <div>
+          <div class="aktion" id="g-aktion">...</div>
+          <div class="grund" id="g-grund">Warte auf die KI-Zentrale</div>
+          <div class="meta" id="g-meta"></div>
+        </div>
+      </div>
+      <div class="karte">
+        <div class="reiter" id="ansichten">
+          <button data-ansicht="ki" class="aktiv">KI-Sicht</button>
+          <button data-ansicht="linie">Linie</button>
+          <button data-ansicht="lidar">LiDAR-Radar</button>
+          <button data-ansicht="tiefe">Tiefe</button>
+        </div>
+        <div class="bildflaeche">
+          <img id="live" alt="Live-Bild">
+          <canvas id="radar" hidden></canvas>
+        </div>
+        <div id="lidar-regler" class="lidar-regler" hidden></div>
+        <p class="hinweis" id="ansicht-hinweis"></p>
+      </div>
+    </div>
+    <div>
+      <div class="karte">
+        <h2>Steuerung</h2>
+        <div class="segmente" id="szenarien"></div>
+        <div class="tempo">
+          <span>Tempo</span>
+          <input type="range" id="tempo" min="0.05" max="0.4" step="0.01" value="0.15">
+          <b id="tempo-wert">0,15 m/s</b>
+        </div>
+        <div class="knoepfe">
+          <button class="k-start" onclick="aktion('start')">START</button>
+          <button class="k-test" onclick="aktion('test')">TEST</button>
+          <button class="k-stopp" onclick="aktion('stopp')">STOPP</button>
+        </div>
+        <div id="antwort"></div>
+      </div>
+      <div class="karte">
+        <h2>Was der Roboter wahrnimmt</h2>
+        <div class="sinne">
+          <div class="sinn" id="sn-ampel"><div class="titel">Ampel</div>
+            <div class="ampel"><i class="g"></i><i class="y"></i><i class="r"></i></div>
+            <div class="klein" id="sn-ampel-t">keine gesehen</div></div>
+          <div class="sinn" id="sn-schild"><div class="titel">Stoppschild</div>
+            <div class="wert" id="sn-schild-w">-</div><div class="klein" id="sn-schild-t"></div></div>
+          <div class="sinn" id="sn-lidar"><div class="titel">LiDAR vorne</div>
+            <div class="wert" id="sn-lidar-w">-</div><div class="balken"><div id="sn-lidar-b"></div></div></div>
+          <div class="sinn" id="sn-tiefe"><div class="titel">Tiefenkamera</div>
+            <div class="wert" id="sn-tiefe-w">-</div><div class="klein">ragt etwas aus dem Boden?</div></div>
+          <div class="sinn" id="sn-linie"><div class="titel">Linie</div>
+            <div class="wert" id="sn-linie-w">-</div><div class="klein" id="sn-linie-t"></div></div>
+          <div class="sinn" id="sn-ki"><div class="titel">Kamera-KI</div>
+            <div class="wert" id="sn-ki-w">-</div><div class="klein" id="sn-ki-t"></div></div>
+          <div class="sinn breit"><div class="titel">KI sieht gerade</div><div class="chips" id="sn-objekte"></div></div>
+        </div>
+      </div>
+      <div class="karte">
+        <h2>Ereignisse</h2>
+        <ul class="ereignisse" id="ereignisse"><li>noch nichts</li></ul>
+      </div>
+    </div>
   </div>
+</section>
 
-  <section id="s-fahren">
-    <div class="karte">
-      <div id="statuszeile">-</div>
-      <div class="hinweis" id="fahren_info"></div>
-    </div>
-    <h2>Szenario</h2>
-    <div class="zeile" id="szenarien"></div>
+<!-- ============ ARM ============ -->
+<section id="s-arm" hidden>
+  <div class="karte">
+    <h2>Greifarm</h2>
+    <div class="warnkasten"><b>Achtung:</b> Der Arm bewegt sich wirklich. Hände weg, Platz rundherum lassen.
+      Die Kamera sitzt am Arm: Vor START immer zurück in die <b>Fahrstellung</b>.
+      Der Roboter meldet die Armstellung nicht zurück, die Regler zeigen nur, was zuletzt geschickt wurde.
+      Schnittstelle stammt aus einem öffentlichen Treiber und ist auf eurem Roboter noch nicht geprüft
+      (zuerst "Arm-Topics anzeigen": dort muss <code>/arm6_joints</code> stehen).</div>
+    <div id="servos"></div>
     <div class="zeile">
-      <button class="gross start" onclick="aktion('start')">START</button>
-      <button class="gross test" onclick="aktion('test')">TEST (faehrt nicht)</button>
-      <button class="gross stopp" onclick="aktion('stopp')">STOPP</button>
+      <span>Dauer</span><input type="range" id="armzeit" min="500" max="5000" step="100" value="2000"><b id="armzeit-w">2,0 s</b>
     </div>
     <div class="zeile">
-      <button onclick="aktion('kamera_start')">Kamera starten</button>
-      <button onclick="aktion('update')">Neueste Version holen</button>
-      <button onclick="if (confirm('Panel beenden? Roboter haelt an.')) aktion('beenden')">Panel beenden</button>
+      <button onclick="armPose()" style="background:var(--lila);color:#140a33;font-weight:800">Pose anfahren</button>
+      <button onclick="aktion('arm_greifer', {auf: true, winkel: regler()}, 'arm-antwort')">Greifer auf</button>
+      <button onclick="aktion('arm_greifer', {auf: false, winkel: regler()}, 'arm-antwort')">Greifer zu</button>
     </div>
-    <pre class="hinweis" id="antwort"></pre>
-    <p class="hinweis">Faehrt der schwarzen Linie nach. Abbiegen an Kreuzungen (zufaellige Richtung) ist noch nicht eingebaut.
-      Vor START: Roboter aufbocken oder freie Strecke, Gamepad nicht gleichzeitig benutzen.</p>
-  </section>
-
-  <section id="s-sensoren" hidden>
-    <div class="karte">
-      <div id="akkugross">Akku: ?</div>
-      <div class="balken"><div id="akkubalken"></div></div>
-      <p class="hinweis">Prozent ist eine grobe Schaetzung aus der Spannung (3 Zellen: 12,6 V voll, 10,5 V leer).</p>
-    </div>
-    <table id="sensortabelle"><tr><td>-</td></tr></table>
-    <p class="hinweis">Hz = Nachrichten pro Sekunde. 0 Hz = Sensor liefert nichts.
-      Fehlen Akku, LiDAR und Odometrie gleichzeitig: Board/Agent pruefen (wie bei RM03).</p>
-  </section>
-
-  <section id="s-kamera" hidden>
-    <img class="ansicht" data-src="/stream/kamera" alt="Kamera">
-    <p class="hinweis">Gruen = Linie, lila Rahmen = Ampel-Suchbereich, rot = Ampel rot erkannt, orange = verworfen (mit Grund), weiss = Stoppschild.
-      Ohne laufendes Fahrprogramm: Rohbild.</p>
-  </section>
-
-  <section id="s-ki" hidden>
+    <div class="zeile" id="posen"></div>
     <div class="zeile">
-      <button onclick="aktion('ki_start')">KI starten</button>
-      <button onclick="aktion('ki_stopp')">KI stoppen</button>
+      <button onclick="armSpeichern('fahrstellung')">Regler als Fahrstellung speichern</button>
+      <button onclick="armSpeichern('pruefblick')">Regler als Prüfblick speichern</button>
+      <button onclick="armSpeichern(prompt('Name der Pose (klein, ohne Leerzeichen):'))">... als eigene Pose</button>
     </div>
-    <img class="ansicht" data-src="/stream/ki" alt="KI">
-    <pre id="objekte">-</pre>
-    <p class="hinweis">Rot = im Weg (Roboter haelt an), gruen = erkannt, nicht im Weg. Das Modell kennt echte Personen/Autos;
-      Spielfiguren und Spielzeugautos nur teilweise.</p>
-  </section>
+    <div class="zeile schalter"><input type="checkbox" id="arm-ki" onchange="aktion('arm_ki', {erlaubt: this.checked}, 'arm-antwort')">
+      <label for="arm-ki">KI darf den Arm bewegen (bei unklarer LiDAR-Meldung im Stand kurz in den Prüfblick schauen)</label></div>
+    <pre id="arm-antwort">-</pre>
+    <button onclick="aktion('arm_diagnose', {}, 'arm-antwort')">Arm-Topics anzeigen (nur lesen)</button>
+  </div>
+</section>
 
-  <section id="s-lidar" hidden>
-    <img class="ansicht" data-src="/stream/lidar" alt="LiDAR">
-    <p class="hinweis">Draufsicht, oben = vorne. Dunkelroter Bereich = Notbremse. Haelt man die Hand vor die Kamera-Seite des Roboters,
-      muss sie oben im roten Bereich auftauchen. Sonst Winkel in config/roboter.yaml (scan_front_deg) anpassen.</p>
-  </section>
+<!-- ============ SENSOREN ============ -->
+<section id="s-sensoren" hidden>
+  <div class="karte">
+    <h2>Akku</h2>
+    <div class="akkugross" id="akku-gross">keine Daten</div>
+    <div class="akkubalken"><div id="akku-balken"></div></div>
+    <p class="hinweis">Prozent ist eine grobe Schätzung aus der Spannung (3 Zellen: 12,6 V voll, 10,5 V leer).</p>
+  </div>
+  <div class="karte">
+    <h2>Sensoren</h2>
+    <table id="sensortabelle"></table>
+    <p class="hinweis">Hz = Nachrichten pro Sekunde, 0 Hz = Sensor liefert nichts. Fehlen Akku, LiDAR und Odometrie gleichzeitig:
+      Board/Agent prüfen (wie bei RM03).</p>
+  </div>
+</section>
 
-  <section id="s-tiefe" hidden>
-    <img class="ansicht" data-src="/stream/tiefe" alt="Tiefe">
-    <p class="hinweis">Tiefenkamera (Abstand je Pixel). Ein Radar hat der Roboter nicht.</p>
-  </section>
-
-  <section id="s-arm" hidden>
-    <div class="karte">
-      <p>Der Greifarm ist noch NICHT eingebunden. Zuerst muss herausgefunden werden, wie er angesteuert wird.</p>
-      <button onclick="aktion('arm_diagnose', {}, 'arm_aus')">Arm-Topics anzeigen (nur lesen)</button>
-      <pre id="arm_aus">-</pre>
-      <p class="hinweis">Siehe docs/greifarm.md</p>
+<!-- ============ SYSTEM ============ -->
+<section id="s-system" hidden>
+  <div class="karte">
+    <h2>Vom Laptop öffnen</h2>
+    <div id="adressen">...</div>
+    <div class="zeile schalter"><input type="checkbox" id="netz" onchange="aktion('netz', {erlaubt: this.checked}, 'sys-antwort')">
+      <label for="netz">Laptop-Zugriff erlauben (nur am Roboter umschaltbar). Dann kann jeder im Netz, der die Adresse kennt, den Roboter steuern.</label></div>
+    <p class="hinweis">Die Adresse wird bei jedem Neuladen neu ermittelt (ändert sich z. B., wenn die VLANs umgestellt werden).</p>
+  </div>
+  <div class="karte">
+    <h2>Programme</h2>
+    <div class="zeile">
+      <button onclick="aktion('kamera_start', {}, 'sys-antwort')">Kamera starten</button>
+      <button onclick="aktion('ki_start', {}, 'sys-antwort')">KI-Zentrale starten</button>
+      <button onclick="aktion('ki_stopp', {}, 'sys-antwort')">KI-Zentrale stoppen</button>
+      <button onclick="aktion('update', {}, 'sys-antwort')">Neueste Version holen</button>
+      <button onclick="if (confirm('Panel beenden? Roboter hält an.')) aktion('beenden', {}, 'sys-antwort')">Panel beenden</button>
     </div>
-  </section>
+    <pre id="sys-antwort">-</pre>
+  </div>
+</section>
 </main>
+
 <script>
-let szenario = 'normal';
+const $ = id => document.getElementById(id);
+let S = null, seite = 'cockpit', ansicht = 'ki', lidarZoom = 1.0;
+const ICON = {
+  fahren: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>',
+  langsam: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17v.5"/></svg>',
+  stopp: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 2h8l6 6v8l-6 6H8l-6-6V8z"/></svg>',
+};
+const HINWEIS = {
+  ki: 'Alles, was die KI sieht: Kästen = erkannte Dinge (rot = im Weg), farbige Ringe = leuchtende Ampel-LED, oben die Entscheidung.',
+  linie: 'Was der Linienfolger sieht: grün = erkannte Linie, roter Punkt = Ziel, blaue Linie = Beginn des Suchbereichs. Läuft nur nach START oder TEST.',
+  lidar: 'Draufsicht, oben = vorne. Der LiDAR misst nur in einer dünnen waagrechten Scheibe auf seiner Höhe: ein Schuh ist nur ein kurzer Bogen (seine Vorderkante), keine Fläche. Rot = Notbremse, orange = KI prüft. Steht ein Gegenstand vor der Kamera-Seite, aber die Punkte erscheinen nicht oben: mit den Pfeilen drehen und speichern.',
+  tiefe: 'Tiefenkamera: Farbe = Abstand (rot nah, blau fern, schwarz = keine Messung).',
+};
+const fmt = (x, n = 2) => Number(x).toFixed(n).replace('.', ',');
 
-function zeigeSeite(name) {
-  document.querySelectorAll('.reiter button').forEach(b => b.classList.toggle('aktiv', b.dataset.seite === name));
-  document.querySelectorAll('main section').forEach(s => {
-    const an = s.id === 's-' + name;
-    s.hidden = !an;
-    // Live-Bild nur laden, wenn die Seite sichtbar ist (spart Rechenzeit auf dem Roboter)
-    s.querySelectorAll('img.ansicht').forEach(img => { img.src = an ? img.dataset.src + '?t=' + Date.now() : ''; });
-  });
-}
-document.querySelectorAll('.reiter button').forEach(b => b.onclick = () => zeigeSeite(b.dataset.seite));
+// ---------- Seiten / Ansichten ----------
+document.querySelectorAll('.seiten button').forEach(b => b.onclick = () => {
+  seite = b.dataset.seite;
+  document.querySelectorAll('.seiten button').forEach(x => x.classList.toggle('aktiv', x === b));
+  document.querySelectorAll('main > section').forEach(s => s.hidden = s.id !== 's-' + seite);
+});
+document.querySelectorAll('#ansichten button').forEach(b => b.onclick = () => {
+  ansicht = b.dataset.ansicht;
+  document.querySelectorAll('#ansichten button').forEach(x => x.classList.toggle('aktiv', x === b));
+  $('live').hidden = ansicht === 'lidar'; $('radar').hidden = ansicht !== 'lidar'; $('lidar-regler').hidden = ansicht !== 'lidar';
+  $('ansicht-hinweis').textContent = HINWEIS[ansicht];
+});
+$('ansicht-hinweis').textContent = HINWEIS.ki;
 
+// ---------- Aktionen ----------
 async function aktion(name, daten = {}, ziel = 'antwort') {
-  if (name === 'start' || name === 'test') daten.szenario = szenario;
   try {
     const r = await fetch('/api/' + name, { method: 'POST', body: JSON.stringify(daten) });
-    document.getElementById(ziel).textContent = (await r.json()).antwort;
-  } catch (e) {
-    document.getElementById(ziel).textContent = 'Keine Verbindung zum Panel-Programm!';
+    $(ziel).textContent = (await r.json()).antwort;
+  } catch (e) { $(ziel).textContent = 'Keine Verbindung zum Panel-Programm!'; }
+}
+$('tempo').oninput = () => $('tempo-wert').textContent = fmt($('tempo').value) + ' m/s';
+$('tempo').onchange = () => aktion('tempo', { wert: Number($('tempo').value) });
+
+// ---------- Live-Bild: immer erst das naechste holen, wenn das vorige da ist (kein Stau) ----------
+function bildSchleife() {
+  const img = $('live');
+  if (seite !== 'cockpit' || ansicht === 'lidar') { setTimeout(bildSchleife, 300); return; }
+  const quelle = { ki: '/bild/ki.jpg', linie: '/bild/linie.jpg', tiefe: '/bild/tiefe.jpg' }[ansicht];
+  const neu = new Image();
+  neu.onload = () => { img.src = neu.src; setTimeout(bildSchleife, 60); };
+  neu.onerror = () => setTimeout(bildSchleife, 800);
+  neu.src = quelle + '?t=' + Date.now();
+}
+bildSchleife();
+
+// ---------- LiDAR-Radar ----------
+async function radarSchleife() {
+  if (seite === 'cockpit' && ansicht === 'lidar') {
+    try { zeichneRadar(await (await fetch('/api/lidar')).json()); } catch (e) {}
+  }
+  setTimeout(radarSchleife, 180);
+}
+radarSchleife();
+let reglerGebaut = false;
+function baueLidarRegler(d) {
+  const box = $('lidar-regler'); box.innerHTML = '';
+  const farben = ['var(--tuerkis)', 'var(--lila)'];
+  d.scans.forEach((s, i) => {
+    const g = document.createElement('div'); g.className = 'gruppe';
+    g.innerHTML = `<span style="color:${farben[i % 2]};font-weight:700">${s.topic}</span> vorne = <b id="lw${i}">${Math.round(s.front_deg)}°</b>`;
+    for (const [txt, d2] of [['◀ 15°', 15], ['◀ 5°', 5], ['5° ▶', -5], ['15° ▶', -15]]) {
+      const b = document.createElement('button'); b.textContent = txt;
+      b.onclick = () => { const neu = Math.round(s.front_deg + d2); s.front_deg = neu; aktion('lidar_winkel', { index: i, grad: neu }); };
+      g.appendChild(b);
+    }
+    box.appendChild(g);
+  });
+  const sp = document.createElement('button'); sp.textContent = 'Speichern'; sp.style.background = 'var(--blau)';
+  sp.onclick = () => aktion('lidar_speichern'); box.appendChild(sp);
+  for (const z of [0.5, 1, 2]) {
+    const b = document.createElement('button'); b.textContent = `±${String(z).replace('.', ',')} m`;
+    b.onclick = () => lidarZoom = z; box.appendChild(b);
+  }
+  reglerGebaut = true;
+}
+function zeichneRadar(d) {
+  if (!reglerGebaut) baueLidarRegler(d);
+  d.scans.forEach((s, i) => { const el = $('lw' + i); if (el) el.textContent = Math.round(s.front_deg) + '°'; });
+  const c = $('radar'), dpr = window.devicePixelRatio || 1;
+  const W = c.clientWidth, H = c.clientHeight;
+  if (!W || !H) return;
+  if (c.width !== W * dpr) { c.width = W * dpr; c.height = H * dpr; }
+  const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.fillStyle = '#05080f'; g.fillRect(0, 0, W, H);
+  const cx = W / 2, cy = H * 0.62, px = Math.min(W / 2, H * 0.62) / lidarZoom * 0.95; // Pixel pro Meter
+  const P = (x, y) => [cx - y * px, cy - x * px];   // x = vorne, y = links
+  // Zonen
+  const halb = d.halb_deg * Math.PI / 180;
+  for (const [r, farbe] of [[d.pruef, '#f5b30130'], [d.notbremse, '#ef444450']]) {
+    g.beginPath(); g.moveTo(cx, cy); g.arc(cx, cy, r * px, -Math.PI / 2 - halb, -Math.PI / 2 + halb); g.closePath();
+    g.fillStyle = farbe; g.fill();
+  }
+  // Ringe
+  g.strokeStyle = '#24324d'; g.fillStyle = '#5c6f8f'; g.font = '13px system-ui'; g.lineWidth = 1;
+  const schritt = lidarZoom <= 0.5 ? 0.1 : lidarZoom <= 1 ? 0.25 : 0.5;
+  for (let r = schritt; r <= lidarZoom * 1.6; r += schritt) {
+    g.beginPath(); g.arc(cx, cy, r * px, 0, 2 * Math.PI); g.stroke();
+    g.fillText(Math.round(r * 100) + ' cm', cx + 4, cy - r * px - 4);
+  }
+  // Roboter
+  g.fillStyle = '#334155'; g.fillRect(cx - 0.12 * px, cy - 0.15 * px, 0.24 * px, 0.3 * px);
+  g.fillStyle = '#e6edf7'; g.beginPath(); g.moveTo(cx, cy - 0.22 * px); g.lineTo(cx - 8, cy - 0.15 * px + 2); g.lineTo(cx + 8, cy - 0.15 * px + 2); g.fill();
+  // Punkte
+  const farben = ['#22d3ee', '#a78bfa'];
+  d.scans.forEach((s, i) => {
+    for (const [x, y] of s.punkte) {
+      const r = Math.hypot(x, y), a = Math.abs(Math.atan2(y, x));
+      let f = farben[i % 2];
+      if (x > 0 && a <= halb && r < d.pruef) f = r < d.notbremse ? '#ef4444' : '#f5b301';
+      const [qx, qy] = P(x, y);
+      g.fillStyle = f; g.beginPath(); g.arc(qx, qy, 3.2, 0, 2 * Math.PI); g.fill();
+    }
+  });
+  // Legende
+  g.font = '15px system-ui';
+  d.scans.forEach((s, i) => { g.fillStyle = farben[i % 2]; g.fillText(`● ${s.topic} ${s.aktiv ? '' : '(keine Daten)'}`, 12, 22 + i * 20); });
+  g.fillStyle = '#e6edf7'; g.font = 'bold 22px system-ui';
+  const n = d.naechster_vorne;
+  g.fillText(n == null ? 'vorne frei' : `vorne: ${Math.round(n * 100)} cm`, W - 190, 30);
+}
+
+// ---------- Arm ----------
+let servosGebaut = false;
+function baueServos(arm) {
+  const box = $('servos'); box.innerHTML = '';
+  const start = arm.letzte || [90, 120, 0, 0, 90, 180];  // Yahboom-Grundstellung als Startwert (wird NICHT gesendet)
+  arm.namen.forEach((name, i) => {
+    const [lo, hi] = arm.grenzen[i + 1];
+    const z = document.createElement('div'); z.className = 'servo';
+    z.innerHTML = `<span>${name}</span><input type="range" min="${lo}" max="${hi}" value="${start[i]}" id="sv${i}"><b id="svw${i}">${start[i]}°</b>`;
+    box.appendChild(z);
+    z.querySelector('input').oninput = e => $('svw' + i).textContent = e.target.value + '°';
+  });
+  servosGebaut = true;
+}
+const regler = () => [0, 1, 2, 3, 4, 5].map(i => Number($('sv' + i).value));
+function setzeRegler(w) { w.forEach((v, i) => { $('sv' + i).value = v; $('svw' + i).textContent = v + '°'; }); }
+$('armzeit').oninput = () => $('armzeit-w').textContent = fmt($('armzeit').value / 1000, 1) + ' s';
+let armBestaetigt = false;
+function armPose(w) {
+  if (!armBestaetigt && !confirm('Der Arm bewegt sich jetzt. Hände weg und Platz frei?')) return;
+  armBestaetigt = true;
+  if (w) setzeRegler(w);
+  aktion('arm_pose', { winkel: regler(), zeit: Number($('armzeit').value) }, 'arm-antwort');
+}
+function armSpeichern(name) { if (name) aktion('arm_speichern', { name, winkel: regler() }, 'arm-antwort'); }
+function zeigePosen(posen) {
+  const box = $('posen'); const sig = JSON.stringify(posen);
+  if (box.dataset.sig === sig) return; box.dataset.sig = sig; box.innerHTML = '';
+  const namen = Object.keys(posen || {});
+  if (!namen.length) { box.innerHTML = '<span class="hinweis">Noch keine Posen gespeichert.</span>'; return; }
+  for (const n of namen) {
+    const b = document.createElement('button'); b.textContent = '→ ' + n; b.onclick = () => armPose(posen[n]); box.appendChild(b);
   }
 }
 
-function chip(id, text, ok) {
-  const c = document.getElementById(id);
-  c.textContent = text;
-  c.className = 'chip ' + (ok === true ? 'ok' : ok === false ? 'schlecht' : '');
-}
-
-let szenarienGebaut = false;
-function baueSzenarien(liste) {
-  const box = document.getElementById('szenarien');
-  box.innerHTML = '';
-  for (const [k, v] of Object.entries(liste)) {
+// ---------- Status ----------
+function sinn(id, art) { $(id).className = 'sinn' + (art ? ' ' + art : '') + ($(id).classList.contains('breit') ? ' breit' : ''); }
+let szenarienSig = '';
+function baueSzenarien() {
+  const sig = S.szenario + Object.keys(S.szenarien).join();
+  if (sig === szenarienSig) return; szenarienSig = sig;
+  const box = $('szenarien'); box.innerHTML = '';
+  for (const [k, v] of Object.entries(S.szenarien)) {
     const b = document.createElement('button');
-    b.className = 'szenario' + (k === szenario ? ' aktiv' : '');
+    b.className = k === S.szenario ? 'aktiv' : '';
     b.innerHTML = '<b></b><small></small>';
-    b.querySelector('b').textContent = v.titel;
-    b.querySelector('small').textContent = v.text;
-    b.onclick = () => { szenario = k; baueSzenarien(liste); };
+    b.querySelector('b').textContent = v.titel; b.querySelector('small').textContent = v.text;
+    b.onclick = () => aktion('szenario', { szenario: k });
     box.appendChild(b);
   }
 }
-
-async function status() {
-  try {
-    const s = await (await fetch('/api/status')).json();
-    if (!szenarienGebaut) { baueSzenarien(s.szenarien); szenarienGebaut = true; }
-    chip('c-fahren', 'Fahrprogramm: ' + (s.fahren ? 'AN' : 'aus'), s.fahren ? true : null);
-    chip('c-akku', 'Akku: ' + (s.akku == null ? '?' : Number(s.akku).toFixed(1) + ' V / ' + s.akku_prozent + ' %'), s.akku == null ? null : s.akku >= s.akku_warnung);
-    chip('c-kamera', 'Kamera: ' + (s.kamera ? 'ok' : 'aus'), s.kamera);
-    const l = Object.values(s.lidar);
-    chip('c-lidar', 'LiDAR: ' + l.filter(x => x).length + '/' + l.length, l.length > 0 && l.every(x => x));
-    const mitMin = s.sensoren.filter(x => x.ok !== null);
-    const gut = mitMin.filter(x => x.ok).length;
-    chip('c-sensoren', 'Sensoren: ' + gut + '/' + mitMin.length, gut === mitMin.length);
-    const tab = document.getElementById('sensortabelle');
-    tab.innerHTML = '';
-    for (const x of s.sensoren) {
-      const tr = tab.insertRow();
-      tr.insertCell().textContent = x.name;
-      tr.insertCell().textContent = x.topic;
-      tr.insertCell().textContent = x.hz === null ? '' : x.hz.toFixed(1) + ' Hz';
-      const z = tr.insertCell();
-      z.textContent = x.ok === null ? 'Info' : x.ok ? 'OK' : 'FEHLT';
-      z.className = x.ok === null ? '' : x.ok ? 'ok' : 'schlecht';
+function zeigeCockpit() {
+  const ki = S.ki, lf = S.lf;
+  // Gedanke
+  let aktionArt = 'stopp', titel = 'STOPP', grund = 'KI-Zentrale läuft nicht (System → KI-Zentrale starten)';
+  if (ki) { aktionArt = ki.aktion; titel = { fahren: 'FREI', langsam: 'LANGSAM', stopp: 'STOPP' }[ki.aktion] || ki.aktion; grund = ki.grund; }
+  if (ki && !S.fahren) { titel = 'BEREIT'; grund = 'KI: ' + ki.grund + '  ·  Zum Fahren START drücken'; }
+  if (lf && ki && ki.aktion !== 'stopp' && /STOPP/.test(lf.status) ) { aktionArt = 'stopp'; grund = lf.status; }
+  $('gedanke').className = 'karte gedanke ' + aktionArt;
+  $('g-icon').innerHTML = ICON[aktionArt] || ICON.stopp;
+  $('g-aktion').textContent = titel; $('g-grund').textContent = grund;
+  const meta = [];
+  if (S.fahren) meta.push(S.modus);
+  if (ki) meta.push('Szenario ' + (S.szenarien[ki.szenario] || {}).titel, 'KI ' + ki.ki + (ki.ki_ms ? ` (${ki.ki_ms} ms/Bild)` : ''));
+  if (lf) meta.push(`Linienfolger ${fmt(lf.fps, 0)} Bilder/s, ${fmt(Math.abs(lf.linear))} m/s`);
+  $('g-meta').textContent = meta.join(' · ');
+  // Sinne
+  const lampe = ki ? ki.ampel : null;
+  document.querySelectorAll('#sn-ampel .ampel i').forEach(i => i.classList.toggle('an',
+    (lampe === 'gruen' && i.classList.contains('g')) || (lampe === 'gelb' && i.classList.contains('y')) || (lampe === 'rot' && i.classList.contains('r'))));
+  $('sn-ampel-t').textContent = lampe ? `${lampe} (${ki.ampel_quelle})` : 'keine leuchtende Ampel';
+  sinn('sn-ampel', lampe === 'rot' || lampe === 'gelb' ? 'alarm' : lampe === 'gruen' ? 'gut' : '');
+  $('sn-schild-w').textContent = ki && ki.stoppschild ? 'erkannt' : 'keins';
+  $('sn-schild-t').textContent = ki && ki.stoppschild ? ki.schild_quelle : '';
+  sinn('sn-schild', ki && ki.stoppschild ? 'alarm' : '');
+  const d = ki ? ki.lidar : null;
+  $('sn-lidar-w').textContent = d == null ? 'keine Daten' : d >= 5 ? 'frei' : Math.round(d * 100) + ' cm';
+  $('sn-lidar-b').style.width = d == null ? '0%' : Math.min(100, d / 1.0 * 100) + '%';
+  $('sn-lidar-b').style.background = d == null ? '#333' : d < 0.12 ? 'var(--rot)' : d < 0.45 ? 'var(--gelb)' : 'var(--tuerkis)';
+  sinn('sn-lidar', d == null ? 'alarm' : d < 0.12 ? 'alarm' : d < 0.45 ? 'achtung' : 'gut');
+  const t = ki ? ki.tiefe_hindernis : null;
+  $('sn-tiefe-w').textContent = !ki ? '-' : t === null ? 'lernt Boden ...' : t ? 'Hindernis!' : 'frei';
+  sinn('sn-tiefe', t ? 'alarm' : t === false ? 'gut' : '');
+  $('sn-linie-w').textContent = !lf ? 'aus' : lf.linie ? 'erkannt' : 'nicht gefunden';
+  $('sn-linie-t').textContent = lf ? `${fmt(lf.fps, 0)} Bilder/s · Lenkung ${fmt(lf.angular)}` : 'START oder TEST drücken';
+  sinn('sn-linie', !lf ? '' : lf.linie ? 'gut' : 'achtung');
+  $('sn-ki-w').textContent = ki ? (ki.ki_ms ? ki.ki_ms + ' ms' : 'läuft') : 'aus';
+  $('sn-ki-t').textContent = ki ? ki.ki : '';
+  sinn('sn-ki', ki ? 'gut' : 'alarm');
+  const box = $('sn-objekte'); box.innerHTML = '';
+  for (const o of (ki ? ki.objekte : [])) {
+    const c = document.createElement('span'); c.className = 'chip' + (o.im_weg ? ' weg' : '');
+    c.textContent = `${o.name} ${Math.round(o.sicher * 100)} %${o.farbe ? ' ' + o.farbe : ''}${o.im_weg ? ' · IM WEG' : ''}`;
+    box.appendChild(c);
+  }
+  if (!box.children.length) box.innerHTML = '<span class="hinweis" style="margin:0">nichts erkannt</span>';
+  // Ereignisse
+  const liste = $('ereignisse'); const sig = S.ereignisse.length + (S.ereignisse[0] || {}).zeit;
+  if (liste.dataset.sig !== String(sig)) {
+    liste.dataset.sig = sig; liste.innerHTML = '';
+    for (const e of S.ereignisse) {
+      const li = document.createElement('li'); li.className = e.art;
+      const zeit = new Date(e.zeit * 1000).toLocaleTimeString('de-DE');
+      li.innerHTML = '<span class="punkt"></span><time></time><span></span>';
+      li.querySelector('time').textContent = zeit; li.lastChild.textContent = e.text;
+      liste.appendChild(li);
     }
-    const p = s.akku_prozent;
-    document.getElementById('akkugross').textContent = s.akku == null ? 'Akku: keine Daten'
-      : 'Akku: ' + Number(s.akku).toFixed(2) + ' V  (ca. ' + p + ' %)';
-    const bal = document.getElementById('akkubalken');
-    bal.style.width = (p || 0) + '%';
-    bal.style.background = p == null ? '#333' : p < 25 ? 'var(--rot)' : p < 50 ? 'var(--gelb)' : 'var(--gruen)';
-    document.getElementById('akkuwarnung').hidden = !(s.akku != null && s.akku < s.akku_warnung);
-    chip('c-ki', 'KI: ' + (s.ki ? 'an' : 'aus'), s.ki ? true : null);
-    document.getElementById('statuszeile').textContent = s.status || (s.fahren ? 'startet ...' : 'Fahrprogramm aus');
-    document.getElementById('fahren_info').textContent = s.fahren_info && s.fahren ? s.fahren_info : '';
-    document.getElementById('objekte').textContent = s.objekte.length
-      ? s.objekte.map(o => `${o.im_weg ? 'IM WEG  ' : '        '}${o.name}  ${Math.round(o.sicher * 100)} %`).join('\n')
-      : 'nichts erkannt';
-  } catch (e) {
-    chip('c-fahren', 'Panel-Programm nicht erreichbar', false);
+    if (!S.ereignisse.length) liste.innerHTML = '<li>noch nichts</li>';
   }
 }
-setInterval(status, 500);
-status();
+function zeigeKopf() {
+  $('roboter').textContent = S.roboter || '';
+  const p = S.akku_prozent;
+  $('akku-text').textContent = S.akku == null ? 'Akku ?' : `${fmt(S.akku, 1)} V · ${p} %`;
+  $('akku-fuell').setAttribute('width', S.akku == null ? 0 : 19 * p / 100);
+  $('akku-fuell').setAttribute('fill', p == null ? '#555' : p < 25 ? 'var(--rot)' : p < 50 ? 'var(--gelb)' : 'var(--gruen)');
+  $('akkuwarnung').hidden = !(S.akku != null && S.akku < S.akku_warnung);
+  $('p-netz').textContent = S.ips.length ? 'IP ' + S.ips[0] : 'keine IP';
+  $('p-netz').title = S.ips.length ? `Vom Laptop: http://${S.ips[0]}:${S.port} (Laptop-Zugriff ${S.netz_erlaubt ? 'AN' : 'AUS'}, siehe System)` : '';
+}
+function zeigeSensoren() {
+  const p = S.akku_prozent;
+  $('akku-gross').textContent = S.akku == null ? 'keine Akkudaten' : `${fmt(S.akku)} V  (ca. ${p} %)`;
+  $('akku-balken').style.width = (p || 0) + '%';
+  $('akku-balken').style.background = p == null ? '#333' : p < 25 ? 'var(--rot)' : p < 50 ? 'var(--gelb)' : 'var(--gruen)';
+  const tab = $('sensortabelle'); tab.innerHTML = '';
+  for (const x of S.sensoren) {
+    const tr = tab.insertRow();
+    tr.insertCell().textContent = x.name; tr.insertCell().textContent = x.topic;
+    tr.insertCell().textContent = x.hz === null ? '' : fmt(x.hz, 1) + ' Hz';
+    const z = tr.insertCell(); z.textContent = x.ok === null ? 'Info' : x.ok ? 'OK' : 'FEHLT';
+    z.className = x.ok === null ? '' : x.ok ? 'ok' : 'schlecht';
+  }
+}
+function zeigeSystem() {
+  const box = $('adressen');
+  const urls = S.ips.map(ip => `http://${ip}:${S.port}`);
+  const sig = urls.join();
+  if (box.dataset.sig !== sig) {
+    box.dataset.sig = sig;
+    box.innerHTML = urls.length ? '' : 'Keine Netzwerkadresse gefunden (WLAN/LAN verbunden?)';
+    for (const u of urls) { const d = document.createElement('div'); d.className = 'adresse'; d.textContent = u; box.appendChild(d); }
+  }
+  $('netz').checked = S.netz_erlaubt; $('netz').disabled = !S.lokal;
+}
+async function status() {
+  try {
+    S = await (await fetch('/api/status')).json();
+    baueSzenarien(); zeigeKopf();
+    if (document.activeElement !== $('tempo')) { $('tempo').value = S.tempo; $('tempo-wert').textContent = fmt(S.tempo) + ' m/s'; }
+    if (seite === 'cockpit') zeigeCockpit();
+    if (seite === 'sensoren') zeigeSensoren();
+    if (seite === 'system') zeigeSystem();
+    if (seite === 'arm') {
+      if (!servosGebaut) baueServos(S.arm);
+      zeigePosen(S.arm.posen); $('arm-ki').checked = S.arm.ki_darf;
+    }
+  } catch (e) {
+    $('g-aktion').textContent = 'KEINE VERBINDUNG'; $('g-grund').textContent = 'Panel-Programm läuft nicht';
+    $('gedanke').className = 'karte gedanke stopp';
+  }
+}
+setInterval(status, 400); status();
 </script>
 </body>
 </html>
