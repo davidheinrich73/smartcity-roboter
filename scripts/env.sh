@@ -11,3 +11,11 @@ export ROS_DOMAIN_ID=30
 # Pfad zum Repository (Ordner ueber scripts/)
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export REPO_DIR
+
+# Sucht eine Launch-Datei in einem ROS-Paket. Gibt den Pfad aus oder nichts.
+# Beispiel: finde_launch slam_mapping slam_toolbox.launch.py
+finde_launch() {
+    local prefix
+    prefix=$(ros2 pkg prefix "$1" 2>/dev/null) || return 1
+    [ -f "$prefix/share/$1/launch/$2" ] && echo "$prefix/share/$1/launch/$2"
+}

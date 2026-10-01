@@ -1,20 +1,14 @@
 #!/bin/bash
-# Laedt eine gespeicherte Karte (nur anzeigen/bereitstellen, noch KEINE Navigation).
-# Aufruf: scripts/karte_laden.sh smartcity
-# UNGETESTET auf dem M3 Pro.
+# Laedt eine gespeicherte Karte und zeigt sie in RViz (noch KEINE Navigation, faehrt nicht).
+# Aufruf: scripts/karte_laden.sh smartcity     (ohne Fenster: ... smartcity rviz:=false)
 source "$(dirname "$0")/env.sh"
-NAME="${1:-smartcity}"
+export DISPLAY="${DISPLAY:-:0}"
+NAME="${1:-smartcity}"; shift
 MAP="$REPO_DIR/maps/$NAME.yaml"
 if [ ! -f "$MAP" ]; then
-    echo "Karte $MAP nicht gefunden. Vorhanden:"; ls "$REPO_DIR/maps"; exit 1
+    echo "Karte $MAP nicht gefunden. Vorhanden:"; ls "$REPO_DIR/maps" 2>/dev/null; exit 1
 fi
-echo "Lade $MAP auf Topic /map ..."
-ros2 run nav2_map_server map_server --ros-args -p yaml_filename:="$MAP" &
-SERVER=$!
-sleep 3
-ros2 run nav2_lifecycle_manager lifecycle_manager --ros-args \
-    -p node_names:="['map_server']" -p autostart:=true &
-MANAGER=$!
-trap "kill $SERVER $MANAGER 2>/dev/null" EXIT
-echo "Karte bereit. In RViz Topic /map anzeigen. Beenden mit Strg+C."
-wait
+if ros2 node list 2>/dev/null | grep -q slam_toolbox; then
+    echo "slam_toolbox laeuft noch (karte_erstellen.sh). Erst beenden, sonst gibt es zwei Karten."; exit 1
+fi
+exec ros2 launch "$REPO_DIR/launch/karte_laden.launch.py" map:="$MAP" rviz_config:="$REPO_DIR/config/karte.rviz" "$@"
