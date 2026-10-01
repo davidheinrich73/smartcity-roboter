@@ -3,4 +3,7 @@
 # Zusaetzliche Einstellungen anhaengen, z. B.:  scripts/fahren.sh -p speed:=0.1
 source "$(dirname "$0")/env.sh"
 export DISPLAY="${DISPLAY:-:0}"
-python3 "$REPO_DIR/line_follower/line_follower.py" --ros-args -p drive:=true "$@"
+# Eingestellte Ampelwerte laden, falls vorhanden (erzeugt mit ampel_kalibrieren.sh)
+PARAMS=()
+[ -f "$REPO_DIR/config/ampel.yaml" ] && PARAMS=(--params-file "$REPO_DIR/config/ampel.yaml")
+python3 "$REPO_DIR/line_follower/line_follower.py" --ros-args "${PARAMS[@]}" -p drive:=true "$@"

@@ -14,6 +14,8 @@ from geometry_msgs.msg import Twist
 from cv_bridge import CvBridge
 import cv2
 
+import ampel  # liegt im selben Ordner
+
 
 class LineFollower(Node):
     def __init__(self):
@@ -31,17 +33,12 @@ class LineFollower(Node):
         self.declare_parameter('strip_start', 0.75)   # Linie nur ab 75 % Bildhoehe (unten) suchen
         self.declare_parameter('min_area', 500)       # kleinere schwarze Flecken ignorieren
         # ---- Ampel ----
-        # Die Ampel-LEDs sind klein (ca. 5 mm). Deshalb kleine Mindestflaeche,
-        # dafuer hohe Mindesthelligkeit, damit nur LEUCHTENDES Rot zaehlt.
+        # Erkennung steht in ampel.py. Alle Werte dort in STANDARD, hier als
+        # ROS-Parameter verfuegbar. Eingestellte Werte: config/ampel.yaml
         self.declare_parameter('red_check', True)     # Ampelerkennung an/aus
-        self.declare_parameter('red_top', 0.0)        # Suchbereich Ampel oben (Anteil Bildhoehe)
-        self.declare_parameter('red_bottom', 0.6)     # Suchbereich Ampel unten
-        self.declare_parameter('red_left', 0.0)       # Suchbereich Ampel links (Anteil Bildbreite)
-        self.declare_parameter('red_right', 1.0)      # Suchbereich Ampel rechts
-        self.declare_parameter('red_sat_min', 100)    # wie kraeftig das Rot sein muss (0-255)
-        self.declare_parameter('red_val_min', 200)    # wie hell das Rot sein muss (0-255)
-        self.declare_parameter('red_min_area', 15)    # kleinere rote Flecken ignorieren (Pixel)
         self.declare_parameter('red_frames', 3)       # so viele Bilder rot hintereinander -> Stopp
+        for name, wert in ampel.STANDARD.items():
+            self.declare_parameter(name, wert)
 
         self.red_hits = 0
         self.red_stop = False
@@ -76,26 +73,9 @@ class LineFollower(Node):
                     return y0, mask, biggest, int(m['m10'] / m['m00']), int(m['m01'] / m['m00'])
         return y0, mask, None, None, None
 
-    def find_red(self, img, h, w):
-        ry0, ry1 = int(h * self.p('red_top')), int(h * self.p('red_bottom'))
-        rx0, rx1 = int(w * self.p('red_left')), int(w * self.p('red_right'))
-        area = (rx0, ry0, rx1, ry1)
-        part = img[ry0:ry1, rx0:rx1]
-        if part.size == 0:
-            return area, None, None
-        hsv = cv2.cvtColor(part, cv2.COLOR_BGR2HSV)
-        s, v = self.p('red_sat_min'), self.p('red_val_min')
-        # Rot liegt im Farbkreis an beiden Enden (0-10 und 170-180)
-        mask = cv2.inRange(hsv, (0, s, v), (10, 255, 255)) | cv2.inRange(hsv, (170, s, v), (180, 255, 255))
-        # Kleine Luecken schliessen (LED-Mitte ist oft fast weiss)
-        mask = cv2.dilate(mask, None, iterations=1)
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if contours:
-            big = max(contours, key=cv2.contourArea)
-            if cv2.contourArea(big) >= self.p('red_min_area'):
-                x, y, bw, bh = cv2.boundingRect(big)
-                return area, mask, (rx0 + x, ry0 + y, bw, bh)
-        return area, mask, None
+    def find_red(self, img):
+        cfg = {name: self.p(name) for name in ampel.STANDARD}
+        return ampel.finde_rot(img, cfg)
 
     def on_image(self, msg):
         self.last_image = time.time()
@@ -104,9 +84,10 @@ class LineFollower(Node):
 
         y0, line_mask, biggest, cx, cy = self.find_line(img, h, w)
 
-        red_area, red_mask, red_box = (None, None, None)
+        red, red_box = None, None
         if self.p('red_check'):
-            red_area, red_mask, red_box = self.find_red(img, h, w)
+            red = self.find_red(img)
+            red_box = red['treffer']
 
         # Entprellen: erst nach mehreren roten Bildern stoppen, erst ohne Rot wieder fahren
         if red_box is not None:
@@ -142,18 +123,15 @@ class LineFollower(Node):
             if cx is not None:
                 cv2.drawContours(view[y0:h, :], [biggest], -1, (0, 255, 0), 2)  # gruen: erkannte Linie
                 cv2.circle(view, (cx, y0 + cy), 8, (0, 0, 255), -1)              # rot: Zielpunkt
-            if red_area is not None:
-                cv2.rectangle(view, red_area[:2], red_area[2:], (255, 0, 255), 1)  # lila: Suchbereich Ampel
-            if red_box is not None:
-                x, y, bw, bh = red_box
-                cv2.rectangle(view, (x - 4, y - 4), (x + bw + 4, y + bh + 4), (0, 0, 255), 3)
+            if red is not None:
+                ampel.zeichne(view, red)  # lila Suchbereich, orange verworfen, rot = Ampel
             mode = 'FAEHRT' if self.p('drive') else 'TESTMODUS (faehrt nicht)'
             cv2.putText(view, mode, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
             cv2.putText(view, status, (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
             cv2.imshow('Linienfolger', view)
             cv2.imshow('Maske Linie', line_mask)
-            if red_mask is not None:
-                cv2.imshow('Maske Rot', red_mask)
+            if red is not None and red['maske'] is not None:
+                cv2.imshow('Maske Rot', red['maske'])
             cv2.waitKey(1)
 
 
