@@ -1,7 +1,7 @@
 # SmartCity 2026 – Roboter / Autonomes Fahren
 
 Code für die Yahboom ROSMASTER M3 Pro (Jetson Orin, ROS 2 Humble, Domain-ID 30).
-Der Roboter folgt der **schwarzen Linie**, hält an **roter Ampel**, am **Stoppschild** und vor **Hindernissen** (LiDAR + KI) und kann mit dem **LiDAR** eine Karte erstellen.
+Der Roboter folgt der **schwarzen Linie**. Eine **KI-Zentrale** behält Kamera, LiDAR und Tiefenkamera im Blick und entscheidet: fahren, langsam oder stopp (rote Ampel, Stoppschild, Hindernis, Person …). Dazu: Greifarm-Steuerung, LiDAR-Karte, Simulation ohne Roboter.
 
 ## Einmalig auf jedem Roboter
 
@@ -10,78 +10,102 @@ cd ~
 git clone https://github.com/davidheinrich73/smartcity-roboter.git
 cd ~/smartcity-roboter
 scripts/installieren.sh
+scripts/browser_installieren.sh
 ```
 
-`installieren.sh` **am Roboter-Bildschirm** (nicht über SSH) ausführen. Es legt **SmartCity Panel** auf dem Desktop und im Programm-Menü an (Super-Taste, "SmartCity" tippen), fragt nach dem Roboter-Namen (RM01–RM04) und bietet an, onnxruntime für die KI zu installieren. An Yahboom-Dateien und am Autostart ändert es nichts.
+- `installieren.sh` **am Roboter-Bildschirm** ausführen, nicht über SSH. Es legt **SmartCity Panel** ins Programm-Menü und (nach Rückfrage) ins **Dock** und fragt nach dem Roboter-Namen (RM01–RM04). Außerdem bietet es an, onnxruntime für die KI zu installieren. An Yahboom-Dateien und am Autostart ändert es nichts.
+- `browser_installieren.sh`: Chromium startet auf dem Jetson nicht (bekanntes Problem, siehe `docs/browser.md`). Empfohlen ist Punkt 1, das eigene Panel-Fenster ohne Browser.
 
-## Benutzen: Doppelklick auf "SmartCity Panel"
+## Benutzen: Klick auf "SmartCity Panel" im Dock
 
-Am zuverlässigsten: das Symbol im **Dock** (Leiste am Bildschirmrand), `installieren.sh` legt es nach Rückfrage dort an. Das Desktop-Symbol meldet auf dem Jetson trotz Markierung "Untrusted Desktop File" (Ursache noch unklar).
-
-Startet Kamera, KI-Erkennung und das Control-Panel im Vollbild. **Fenster schließen = Roboter hält an, alles wird beendet.**
+Startet Kamera, KI-Zentrale und das Control-Panel. **Panel-Fenster schließen = Roboter hält an, alles wird beendet.**
 
 | Seite | Inhalt |
 |---|---|
-| Fahren | Szenario wählen (Normal, RTW-Einsatz, Langsam), **START**, **TEST** (fährt nicht), **STOPP** |
+| Cockpit | **Was der Roboter gerade denkt** (FREI / LANGSAM / STOPP + Grund), Live-Bild (KI-Sicht, Linie, LiDAR-Radar, Tiefe), Szenario, Tempo-Regler, **START / TEST / STOPP**, alle Sinne auf einen Blick, Ereignis-Protokoll |
+| Arm | 6 Servos per Regler, Greifer auf/zu, Posen speichern (Fahrstellung, Prüfblick), KI-Freigabe |
 | Sensoren | Akku (Volt + geschätzte Prozent), Agent, Motorboard, IMU, Odometrie, beide LiDARs, Kamera, Gamepad mit Hz |
-| Kamera | was der Linienfolger sieht (Linie, Ampel, Stoppschild) |
-| KI-Erkennung | Personen, Autos usw. mit Kästen; rot = im Weg |
-| LiDAR | Draufsicht beider LiDARs mit Notbrems-Bereich |
-| Tiefe | Tiefenkamera farbig (rot = nah). Ein Radar hat der Roboter nicht. |
-| Greifarm | noch nicht eingebunden, nur Diagnose (siehe `docs/greifarm.md`) |
+| System | **IP-Adresse für den Laptop**, Laptop-Zugriff an/aus, Kamera/KI starten, Update, Panel beenden |
 
 Der rote **STOPP**-Knopf oben ist auf jeder Seite sichtbar. Not-Aus von außen: `scripts/stopp.sh`.
 
-Panel ohne Roboter ansehen (z. B. auf dem Laptop): `python3 tests/panel_demo.py`, dann http://localhost:8099
+**Vom Laptop:** Im Panel unter System "Laptop-Zugriff erlauben", dann die angezeigte Adresse öffnen (z. B. `http://10.0.12.62:8080`). Die IP wird jedes Mal neu ermittelt. Achtung: Wer die Adresse kennt, kann dann den Roboter steuern.
 
-Vom Laptop aus bedienen: `scripts/panel.sh --netz`, dann `http://<IP-des-Roboters>:8080`. **Achtung:** dann kann jeder im Netz den Roboter starten.
+**Panel ohne Roboter ansehen:** `python3 tests/panel_demo.py`, dann http://localhost:8099 (ohne ROS, ausgedachte Daten).
 
-## Wann hält der Roboter an?
+## Wer entscheidet was?
 
-1. **LiDAR** sieht etwas näher als 30 cm vorne (oder LiDAR liefert nichts) → Stopp
-2. **KI** meldet Person/Auto/… im Weg → Stopp
-3. **Ampel rot** → Stopp, bis Rot weg ist (nicht im Szenario RTW-Einsatz)
-4. **Stoppschild** → 3 s halten, dann weiter (nicht im Szenario RTW-Einsatz)
-5. **keine Linie** oder **keine Kamerabilder** → Stopp
+```
+Kamera, LiDAR, Tiefenkamera ──► KI-Zentrale (ki/) ──► fahren / langsam / stopp ──► Linienfolger ──► Motoren
+                                       └──► Arm (nur wenn freigegeben, nur im Stand)
+```
 
-**Noch nicht eingebaut:** Abbiegen an Kreuzungen (zufällig durchs Straßennetz), Greifarm, Navigation auf der Karte.
+| # | Situation | Entscheidung |
+|---|---|---|
+| 1 | LiDAR: etwas näher als 12 cm | STOPP sofort, ohne KI-Prüfung (Eigenschutz) |
+| 2 | kein LiDAR / keine Kamerabilder / KI antwortet nicht | STOPP |
+| 3 | LiDAR: etwas zwischen 12 und 45 cm | KI prüft mit Kamera-KI und Tiefenkamera: bestätigt → STOPP, sonst LANGSAM |
+| 4 | Kamera-KI sieht Person/Auto/… im Weg | STOPP |
+| 5 | Ampel rot/gelb | STOPP bis grün |
+| 6 | Stoppschild | 3 s halten, dann weiter |
+| 7 | keine Linie | STOPP |
+
+Szenario **RTW-Einsatz**: 5 und 6 werden übergangen, alles andere gilt weiter. Details: `docs/ki.md`.
+
+**Noch nicht eingebaut:** Abbiegen an Kreuzungen (zufällig durchs Straßennetz), Gegenstände mit dem Arm aufsammeln, Navigation auf der Karte.
 
 ## Einstellen
 
 | Was | Wie |
 |---|---|
-| Ampel | `scripts/ampel_kalibrieren.sh`: Schieberegler, Lupe, `s` = Foto speichern, `w` = Werte in `config/ampel.yaml` speichern. Ohne Roboter mit gespeicherten Fotos: `python3 line_follower/ampel_kalibrieren.py --bilder ampel_bilder` |
-| LiDAR-Richtung "vorne" | `config/roboter.yaml` → `scan_front_deg`. **Noch nicht geprüft!** Panel → LiDAR, Hand vor die Kamera-Seite halten, Winkel anpassen, bis die Hand oben im roten Bereich erscheint. |
-| Linie, Geschwindigkeit | `scripts/test.sh -p speed:=0.1` usw., siehe Tabelle unten |
+| LiDAR "vorne" | **Zuerst machen!** Panel → Cockpit → LiDAR-Radar. Gegenstand vor die Kamera-Seite stellen, mit den Pfeilen drehen, bis er oben erscheint, "Speichern" (`config/roboter.yaml`). |
+| Arm-Fahrstellung | Panel → Arm, vorsichtig einstellen, "als Fahrstellung speichern" (`config/arm.yaml`) |
+| Ampel-LEDs | `scripts/ampel_kalibrieren.sh`: Schieberegler, Lupe, `s` = Foto, `w` = Werte in `config/ampel.yaml` |
+| Tempo | Regler im Panel (0,05–0,4 m/s, Standard 0,15) |
+| Linie | `scripts/test.sh -p threshold:=60` usw. |
 
-Wichtige Einstellungen des Linienfolgers:
+Wichtige Einstellungen des Linienfolgers (`-p name:=wert` oder `ros2 param set /line_follower name wert`):
 
 | Name | Standard | Bedeutung |
 |---|---|---|
-| `speed` | 0.08 | m/s |
+| `speed` | 0.15 | m/s (vorher 0.08) |
 | `steer_gain` | 0.004 | Lenkstärke. Lenkt falsch herum → Vorzeichen umdrehen |
 | `threshold` | 70 | dunkler als das = Linie |
 | `strip_start` | 0.75 | Linie nur im unteren Viertel suchen |
-| `red_val_min` | 200 | Mindesthelligkeit Rot |
-| `red_max_area` | 1500 | größere rote Flächen = Gegenstand, keine LED |
-| `red_dark_frac` | 0.4 | so viel der Umgebung muss dunkel sein (schwarzes Ampelgehäuse), 0 = aus |
-| `obstacle_dist` | 0.30 | Notbremse ab diesem Abstand (m) |
+| `notbremse_dist` | 0.12 | eigene Notbremse (m), unabhängig von der KI |
 | `obstacle_check` | true | Notbremse an/aus (RM03 hat kein LiDAR → `false`) |
-| `szenario` | normal | `einsatz` = RTW, darf bei Rot fahren |
+| `ki_pflicht` | true | ohne KI-Zentrale nicht fahren |
 
-Während es läuft: `ros2 param set /line_follower red_val_min 220`.
+## Warum fuhr der Roboter so langsam und ruckelig?
+
+1. Tempo war 0,08 m/s. Jetzt 0,15 m/s, im Panel einstellbar.
+2. Das Motorboard stoppt die Motoren 0,3 s nach dem letzten Fahrbefehl. Der alte Linienfolger schickte nur nach jedem verarbeiteten Kamerabild einen Befehl. Jetzt geht der Befehl 20× pro Sekunde raus.
+3. Große Kamerabilder kamen in ROS 2 nur stockend an. In der Simulation waren es 1 statt 15 Bilder/s, weil der Shared-Memory-Bereich von Fast DDS (512 KB) kleiner ist als ein Bild (900 KB). `config/fastdds.xml` vergrößert ihn, `scripts/env.sh` setzt ihn für alle unsere Programme. Danach kamen 15 von 15 Bildern an. Auf dem Roboter noch nicht gemessen. Das Panel zeigt "Linienfolger … Bilder/s" an.
+
+Die Kamera war auf dem Laptop stark verzögert, weil das Panel einen Videostrom geschickt hat, der sich im WLAN aufstaut. Jetzt wird jedes Bild erst geholt, wenn das vorige da ist.
 
 ## Ohne Panel (einzelne Fenster)
 
 | Befehl | Zweck |
 |---|---|
 | `scripts/kamera.sh` | Kamera starten, offen lassen |
-| `scripts/test.sh` | Linienfolger im Testmodus: zeigt Erkennung, **fährt nicht** |
-| `scripts/fahren.sh` | Fährt los. **Strg+C = Not-Aus** |
+| `scripts/ki.sh` | KI-Zentrale |
+| `scripts/test.sh` | Linienfolger im Testmodus: zeigt die Linie, **fährt nicht** |
+| `scripts/fahren.sh` | Fährt los (KI-Zentrale muss laufen). **Strg+C = Not-Aus** |
 | `scripts/stopp.sh` | Not-Aus von außen |
-| `scripts/objekte.sh` | KI-Erkennung |
-| `scripts/check.sh` | Schnellcheck: Name, MAC, Agent, Akku, LiDAR, Kamera. Fährt nicht. |
+| `scripts/check.sh` | Schnellcheck: Name, MAC, Agent, Akku, LiDAR, Kamera, unsere Programme. Fährt nicht. |
+| `scripts/arm_suchen.sh` | Wie wird der Arm angesteuert? Nur lesen. |
+| `scripts/ki_suchen.sh` | Welche KI ist auf dem Roboter? Nur lesen. |
 | `scripts/update.sh` | neueste Version holen |
+
+## Simulation (ohne Roboter, braucht ROS 2 Humble)
+
+```bash
+scripts/simulation.sh           # Simulator + Panel, im Browser http://localhost:8080, START drücken
+scripts/simulation.sh pruefen   # fährt eine Runde und prüft alles automatisch
+```
+
+Ein simulierter Roboter fährt einen Rundkurs: rote Ampel (wird nach 3 s Stand grün), Stoppschild, Hindernis auf der Fahrbahn (geht nach 3 s weg) und ein Haus am Rand, das nur der LiDAR sieht. Die Simulation nutzt Domain-ID 77, nie die 30 der Roboter.
 
 ## Karte (LiDAR)
 
@@ -98,20 +122,23 @@ Klappt etwas nicht: `scripts/karte_diagnose.sh > diagnose.txt` (einmal ohne, ein
 
 **Alle Karten-Skripte sind noch UNGETESTET auf dem Roboter.**
 
-## Tests (ohne Roboter)
+## Tests
 
 ```bash
-python3 tests/test_ampel.py
-python3 tests/test_schilder.py
-python3 tests/test_line_follower.py
+python3 tests/test_ampel.py          # Ampel-LEDs (3 Farben), rote Gegenstände
+python3 tests/test_schilder.py       # Stoppschild-Form
+python3 tests/test_entscheider.py    # Entscheidungen der KI
+python3 tests/test_line_follower.py  # wann der Linienfolger fährt
+scripts/simulation.sh pruefen        # alles zusammen (braucht ROS 2)
 ```
 
 ## Bekannte Probleme
 
 - Alle Roboter heißen `yahboom` → nur einen gleichzeitig einschalten (Domain-ID 30 für alle).
 - Waagrechte schwarze Flächen (Kreuzungen, Kabel) verwirren den Linienfolger.
-- RM03: ein Rad schwächer, Board liefert keine Sensordaten → Notbremse meldet "KEIN LIDAR" und fährt nicht los.
+- RM03: ein Rad schwächer, Board liefert keine Sensordaten → "Kein LiDAR", fährt nicht los.
 - Gamepad und Fahrprogramm senden beide auf `/cmd_vel` → nicht gleichzeitig benutzen.
-- Ampel-LEDs sind klein: Erkennung erst aus der Nähe zuverlässig.
+- Desktop-Symbol meldet "Untrusted Desktop File" trotz Markierung → Dock benutzen.
+- Der LiDAR sieht nur eine dünne waagrechte Scheibe: Ein Schuh ist im Radar nur ein kurzer Bogen.
 
-Siehe auch `docs/roboter.md`, `docs/ki.md`, `docs/greifarm.md`.
+Siehe auch `docs/ki.md`, `docs/greifarm.md`, `docs/browser.md`, `docs/roboter.md`.
