@@ -16,7 +16,7 @@ scripts/installieren.sh
 
 ## Benutzen: Doppelklick auf "SmartCity Panel"
 
-Meldet Ubuntu "nicht vertrauenswürdig": Rechtsklick auf das Symbol → "Start erlauben". Fehlt der Eintrag, `installieren.sh` im Terminal am Roboter-Bildschirm erneut ausführen oder das Panel über das Programm-Menü starten.
+Am zuverlässigsten: das Symbol im **Dock** (Leiste am Bildschirmrand), `installieren.sh` legt es nach Rückfrage dort an. Das Desktop-Symbol meldet auf dem Jetson trotz Markierung "Untrusted Desktop File" (Ursache noch unklar).
 
 Startet Kamera, KI-Erkennung und das Control-Panel im Vollbild. **Fenster schließen = Roboter hält an, alles wird beendet.**
 

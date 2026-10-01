@@ -47,6 +47,19 @@ gio set "$DATEI" metadata::xfce-exe-checksum "$(sha256sum "$DATEI" | cut -d' ' -
 echo "Desktop-Umgebung: ${XDG_CURRENT_DESKTOP:-unbekannt (ueber SSH nicht sichtbar)}"
 echo "Erscheint das Symbol noch als 'nicht vertrauenswuerdig': einmal ab- und wieder anmelden."
 
+# 3) Ins Dock (Leiste am Bildschirmrand) legen. Start dort braucht KEIN "trusted",
+#    das ist der zuverlaessigste Weg unter Ubuntu/GNOME.
+if command -v gsettings >/dev/null; then
+    ALT=$(gsettings get org.gnome.shell favorite-apps 2>/dev/null)
+    if [ -n "$ALT" ] && ! echo "$ALT" | grep -q smartcity-panel.desktop; then
+        read -r -p "SmartCity Panel ins Dock (Leiste am Rand) legen? (j/n) " ok
+        if [ "$ok" = "j" ]; then
+            NEU=$(python3 -c "import ast,sys; l=ast.literal_eval(sys.argv[1].replace('@as ','')); print(l+['smartcity-panel.desktop'])" "$ALT")
+            gsettings set org.gnome.shell favorite-apps "$NEU" && echo "Im Dock angelegt."
+        fi
+    fi
+fi
+
 # Kurzer Check, ob alles da ist
 python3 -c "import cv2, yaml" 2>/dev/null && echo "Python-Pakete: ok" || echo "WARNUNG: python3-opencv oder python3-yaml fehlt"
 [ -f "$REPO_DIR/models/yolov8n.onnx" ] && echo "KI-Modell: ok" || echo "KI-Modell fehlt (models/yolov8n.onnx)"
