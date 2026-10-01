@@ -27,24 +27,34 @@ fi
 # Browser suchen. Eigenes Profil -> eigenes Fenster, Skript wartet, bis es geschlossen wird.
 for B in chromium-browser chromium google-chrome firefox; do
     command -v "$B" >/dev/null || continue
-    ECHT=$(readlink -f "$(command -v "$B")")
+    SNAPNAME="${B%-browser}"
     PROFIL="$HOME/.cache/smartcity-panel-$B"
-    # Snap-Programme duerfen nicht in versteckte Ordner schreiben
-    if [[ "$ECHT" == /snap/* || "$ECHT" == /usr/bin/snap ]]; then
-        PROFIL="$HOME/snap/${B%-browser}/common/smartcity-panel"
+    # Snap-Programme (Ubuntu 22.04: chromium, firefox) duerfen nicht in versteckte Ordner
+    # wie ~/.cache schreiben -> sonst beendet sich der Browser sofort.
+    if [ -e "/snap/bin/$SNAPNAME" ] || [[ "$(readlink -f "$(command -v "$B")")" == /snap/* ]]; then
+        PROFIL="$HOME/snap/$SNAPNAME/common/smartcity-panel"
     fi
     mkdir -p "$PROFIL"
     echo "Oeffne $URL mit $B (Vollbild verlassen: F11, schliessen: Alt+F4)"
+    START=$(date +%s)
     if [ "$B" = firefox ]; then
         firefox --new-instance --profile "$PROFIL" --kiosk "$URL"
     else
         "$B" --user-data-dir="$PROFIL" --app="$URL" --start-fullscreen --no-first-run --noerrdialogs
+    fi
+    if [ $(( $(date +%s) - START )) -lt 5 ]; then
+        echo "FEHLER: $B hat sich sofort wieder beendet (Meldungen siehe oben). Versuche naechsten Browser ..."
+        continue
     fi
     [ -n "$LAEUFT_SCHON" ] && exit 0
     echo "Browser geschlossen -> Panel wird beendet, Roboter haelt an."
     exit 0
 done
 
-echo "Kein Browser gefunden. Panel im Browser oeffnen: $URL"
-echo "Beenden: Strg+C"
+[ -n "$LAEUFT_SCHON" ] && exit 1
+echo
+echo "Kein Browser hat funktioniert. Das Panel laeuft trotzdem weiter:"
+echo "  Im Browser von Hand oeffnen: $URL"
+xdg-open "$URL" >/dev/null 2>&1
+echo "Beenden: Strg+C in diesem Fenster (Roboter haelt an)."
 wait
