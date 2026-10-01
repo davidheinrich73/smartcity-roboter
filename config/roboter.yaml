@@ -1,14 +1,16 @@
-# Einstellungen fuer Linienfolger und Control-Panel (gleich fuer alle Roboter).
-# Wird von test.sh, fahren.sh und dem Panel automatisch geladen.
-# Ampelwerte stehen getrennt in config/ampel.yaml.
-line_follower:
+# Einstellungen fuer Linienfolger, KI-Zentrale und Panel (gleich fuer alle Roboter).
+# Wird automatisch geladen. Ampelwerte stehen getrennt in config/ampel.yaml.
+# "/**" = gilt fuer alle Programme.
+/**:
   ros__parameters:
-    # LiDAR-Notbremse. "Vorne" je LiDAR ist NOCH NICHT GEPRUEFT:
-    # Panel -> LiDAR, Hand vor die Kamera-Seite halten und Winkel anpassen,
-    # bis der rote Sektor nach oben zeigt und die Hand darin auftaucht.
-    obstacle_check: true
+    # LiDAR. "Vorne" je LiDAR ist NOCH NICHT GEPRUEFT:
+    # Panel -> LiDAR-Radar, Gegenstand vor die Kamera-Seite stellen und mit den Pfeilen drehen,
+    # bis er oben im Bild erscheint, dann "Speichern".
     scan_topics: ['/scan0', '/scan1']
     scan_front_deg: [0.0, 0.0]
     obstacle_half_deg: 30.0
-    obstacle_dist: 0.30
     obstacle_min_range: 0.08
+line_follower:
+  ros__parameters:
+    obstacle_check: true
+    notbremse_dist: 0.12

@@ -6,4 +6,7 @@ export DISPLAY="${DISPLAY:-:0}"
 # Einstellungen laden: roboter.yaml (LiDAR) und, falls vorhanden, ampel.yaml
 PARAMS=(--params-file "$REPO_DIR/config/roboter.yaml")
 [ -f "$REPO_DIR/config/ampel.yaml" ] && PARAMS+=(--params-file "$REPO_DIR/config/ampel.yaml")
+if ! ros2 node list 2>/dev/null | grep -q ki_zentrale; then
+    echo "HINWEIS: KI-Zentrale laeuft nicht -> der Roboter bleibt stehen. Zweites Fenster: scripts/ki.sh"
+fi
 python3 "$REPO_DIR/line_follower/line_follower.py" --ros-args "${PARAMS[@]}" -p drive:=true "$@"
