@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Roboter-Panel</title>
+<style>
+  :root { --bg: #111; --karte: #1e1e1e; --text: #eee; --grau: #888; --gruen: #1f9d55; --rot: #d42a2a; --blau: #2a6fd4; --gelb: #d4a72a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; font-size: 18px; }
+  header { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 10px 16px; background: #000; }
+  header h1 { font-size: 22px; margin: 0 12px 0 0; }
+  .chip { padding: 4px 10px; border-radius: 12px; background: #333; font-size: 15px; }
+  .chip.ok { background: #14532d; } .chip.schlecht { background: #7f1d1d; }
+  main { padding: 16px; max-width: 1200px; margin: 0 auto; }
+  .reiter { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  .reiter button { flex: 1 1 140px; }
+  button { font-size: 20px; padding: 16px; border: 0; border-radius: 10px; background: #333; color: var(--text); cursor: pointer; }
+  button.aktiv { background: var(--blau); }
+  button:active { transform: scale(0.98); }
+  .gross { font-size: 30px; padding: 28px; flex: 1 1 220px; font-weight: bold; }
+  .start { background: var(--gruen); } .stopp { background: var(--rot); } .test { background: var(--gelb); color: #000; }
+  .zeile { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+  .karte { background: var(--karte); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .szenario { flex: 1 1 200px; text-align: left; }
+  .szenario small { display: block; font-size: 14px; color: #ccc; margin-top: 6px; }
+  #statuszeile { font-size: 22px; font-family: monospace; min-height: 1.5em; }
+  img.ansicht { width: 100%; max-height: 70vh; object-fit: contain; background: #000; border-radius: 10px; }
+  pre { white-space: pre-wrap; background: #000; padding: 12px; border-radius: 8px; font-size: 14px; }
+  .hinweis { color: var(--grau); font-size: 15px; }
+  #nothalt { margin-left: auto; font-size: 26px; font-weight: bold; padding: 14px 40px; background: var(--rot); }
+  #akkuwarnung { background: var(--rot); color: #fff; font-size: 26px; font-weight: bold; text-align: center; padding: 12px; }
+  #akkugross { font-size: 32px; font-weight: bold; margin-bottom: 8px; }
+  .balken { height: 28px; background: #333; border-radius: 8px; overflow: hidden; }
+  #akkubalken { height: 100%; width: 0; background: var(--gruen); }
+  table { width: 100%; border-collapse: collapse; background: var(--karte); border-radius: 10px; overflow: hidden; }
+  td { padding: 12px; border-bottom: 1px solid #333; }
+  td.ok { color: #4ade80; font-weight: bold; } td.schlecht { color: #f87171; font-weight: bold; }
+  @media (max-width: 600px) { #nothalt { width: 100%; } .gross { font-size: 24px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>SmartCity Roboter</h1>
+  <span class="chip" id="c-fahren">Fahrprogramm: ?</span>
+  <span class="chip" id="c-akku">Akku: ?</span>
+  <span class="chip" id="c-kamera">Kamera: ?</span>
+  <span class="chip" id="c-lidar">LiDAR: ?</span>
+  <span class="chip" id="c-sensoren">Sensoren: ?</span>
+  <span class="chip" id="c-ki">KI: ?</span>
+  <button id="nothalt" onclick="aktion('stopp')">STOPP</button>
+</header>
+<div id="akkuwarnung" hidden>AKKU SCHWACH - Roboter laden!</div>
+<main>
+  <div class="reiter">
+    <button data-seite="fahren" class="aktiv">Fahren</button>
+    <button data-seite="sensoren">Sensoren</button>
+    <button data-seite="kamera">Kamera</button>
+    <button data-seite="ki">KI-Erkennung</button>
+    <button data-seite="lidar">LiDAR</button>
+    <button data-seite="tiefe">Tiefe</button>
+    <button data-seite="arm">Greifarm</button>
+  </div>
+
+  <section id="s-fahren">
+    <div class="karte">
+      <div id="statuszeile">-</div>
+      <div class="hinweis" id="fahren_info"></div>
+    </div>
+    <h2>Szenario</h2>
+    <div class="zeile" id="szenarien"></div>
+    <div class="zeile">
+      <button class="gross start" onclick="aktion('start')">START</button>
+      <button class="gross test" onclick="aktion('test')">TEST (faehrt nicht)</button>
+      <button class="gross stopp" onclick="aktion('stopp')">STOPP</button>
+    </div>
+    <div class="zeile">
+      <button onclick="aktion('kamera_start')">Kamera starten</button>
+      <button onclick="aktion('update')">Neueste Version holen</button>
+      <button onclick="if (confirm('Panel beenden? Roboter haelt an.')) aktion('beenden')">Panel beenden</button>
+    </div>
+    <pre class="hinweis" id="antwort"></pre>
+    <p class="hinweis">Faehrt der schwarzen Linie nach. Abbiegen an Kreuzungen (zufaellige Richtung) ist noch nicht eingebaut.
+      Vor START: Roboter aufbocken oder freie Strecke, Gamepad nicht gleichzeitig benutzen.</p>
+  </section>
+
+  <section id="s-sensoren" hidden>
+    <div class="karte">
+      <div id="akkugross">Akku: ?</div>
+      <div class="balken"><div id="akkubalken"></div></div>
+      <p class="hinweis">Prozent ist eine grobe Schaetzung aus der Spannung (3 Zellen: 12,6 V voll, 10,5 V leer).</p>
+    </div>
+    <table id="sensortabelle"><tr><td>-</td></tr></table>
+    <p class="hinweis">Hz = Nachrichten pro Sekunde. 0 Hz = Sensor liefert nichts.
+      Fehlen Akku, LiDAR und Odometrie gleichzeitig: Board/Agent pruefen (wie bei RM03).</p>
+  </section>
+
+  <section id="s-kamera" hidden>
+    <img class="ansicht" data-src="/stream/kamera" alt="Kamera">
+    <p class="hinweis">Gruen = Linie, lila Rahmen = Ampel-Suchbereich, rot = Ampel rot erkannt, orange = verworfen (mit Grund), weiss = Stoppschild.
+      Ohne laufendes Fahrprogramm: Rohbild.</p>
+  </section>
+
+  <section id="s-ki" hidden>
+    <div class="zeile">
+      <button onclick="aktion('ki_start')">KI starten</button>
+      <button onclick="aktion('ki_stopp')">KI stoppen</button>
+    </div>
+    <img class="ansicht" data-src="/stream/ki" alt="KI">
+    <pre id="objekte">-</pre>
+    <p class="hinweis">Rot = im Weg (Roboter haelt an), gruen = erkannt, nicht im Weg. Das Modell kennt echte Personen/Autos;
+      Spielfiguren und Spielzeugautos nur teilweise.</p>
+  </section>
+
+  <section id="s-lidar" hidden>
+    <img class="ansicht" data-src="/stream/lidar" alt="LiDAR">
+    <p class="hinweis">Draufsicht, oben = vorne. Dunkelroter Bereich = Notbremse. Haelt man die Hand vor die Kamera-Seite des Roboters,
+      muss sie oben im roten Bereich auftauchen. Sonst Winkel in config/roboter.yaml (scan_front_deg) anpassen.</p>
+  </section>
+
+  <section id="s-tiefe" hidden>
+    <img class="ansicht" data-src="/stream/tiefe" alt="Tiefe">
+    <p class="hinweis">Tiefenkamera (Abstand je Pixel). Ein Radar hat der Roboter nicht.</p>
+  </section>
+
+  <section id="s-arm" hidden>
+    <div class="karte">
+      <p>Der Greifarm ist noch NICHT eingebunden. Zuerst muss herausgefunden werden, wie er angesteuert wird.</p>
+      <button onclick="aktion('arm_diagnose', {}, 'arm_aus')">Arm-Topics anzeigen (nur lesen)</button>
+      <pre id="arm_aus">-</pre>
+      <p class="hinweis">Siehe docs/greifarm.md</p>
+    </div>
+  </section>
+</main>
+<script>
+let szenario = 'normal';
+
+function zeigeSeite(name) {
+  document.querySelectorAll('.reiter button').forEach(b => b.classList.toggle('aktiv', b.dataset.seite === name));
+  document.querySelectorAll('main section').forEach(s => {
+    const an = s.id === 's-' + name;
+    s.hidden = !an;
+    // Live-Bild nur laden, wenn die Seite sichtbar ist (spart Rechenzeit auf dem Roboter)
+    s.querySelectorAll('img.ansicht').forEach(img => { img.src = an ? img.dataset.src + '?t=' + Date.now() : ''; });
+  });
+}
+document.querySelectorAll('.reiter button').forEach(b => b.onclick = () => zeigeSeite(b.dataset.seite));
+
+async function aktion(name, daten = {}, ziel = 'antwort') {
+  if (name === 'start' || name === 'test') daten.szenario = szenario;
+  try {
+    const r = await fetch('/api/' + name, { method: 'POST', body: JSON.stringify(daten) });
+    document.getElementById(ziel).textContent = (await r.json()).antwort;
+  } catch (e) {
+    document.getElementById(ziel).textContent = 'Keine Verbindung zum Panel-Programm!';
+  }
+}
+
+function chip(id, text, ok) {
+  const c = document.getElementById(id);
+  c.textContent = text;
+  c.className = 'chip ' + (ok === true ? 'ok' : ok === false ? 'schlecht' : '');
+}
+
+let szenarienGebaut = false;
+function baueSzenarien(liste) {
+  const box = document.getElementById('szenarien');
+  box.innerHTML = '';
+  for (const [k, v] of Object.entries(liste)) {
+    const b = document.createElement('button');
+    b.className = 'szenario' + (k === szenario ? ' aktiv' : '');
+    b.innerHTML = '<b></b><small></small>';
+    b.querySelector('b').textContent = v.titel;
+    b.querySelector('small').textContent = v.text;
+    b.onclick = () => { szenario = k; baueSzenarien(liste); };
+    box.appendChild(b);
+  }
+}
+
+async function status() {
+  try {
+    const s = await (await fetch('/api/status')).json();
+    if (!szenarienGebaut) { baueSzenarien(s.szenarien); szenarienGebaut = true; }
+    chip('c-fahren', 'Fahrprogramm: ' + (s.fahren ? 'AN' : 'aus'), s.fahren ? true : null);
+    chip('c-akku', 'Akku: ' + (s.akku == null ? '?' : Number(s.akku).toFixed(1) + ' V / ' + s.akku_prozent + ' %'), s.akku == null ? null : s.akku >= s.akku_warnung);
+    chip('c-kamera', 'Kamera: ' + (s.kamera ? 'ok' : 'aus'), s.kamera);
+    const l = Object.values(s.lidar);
+    chip('c-lidar', 'LiDAR: ' + l.filter(x => x).length + '/' + l.length, l.length > 0 && l.every(x => x));
+    const mitMin = s.sensoren.filter(x => x.ok !== null);
+    const gut = mitMin.filter(x => x.ok).length;
+    chip('c-sensoren', 'Sensoren: ' + gut + '/' + mitMin.length, gut === mitMin.length);
+    const tab = document.getElementById('sensortabelle');
+    tab.innerHTML = '';
+    for (const x of s.sensoren) {
+      const tr = tab.insertRow();
+      tr.insertCell().textContent = x.name;
+      tr.insertCell().textContent = x.topic;
+      tr.insertCell().textContent = x.hz === null ? '' : x.hz.toFixed(1) + ' Hz';
+      const z = tr.insertCell();
+      z.textContent = x.ok === null ? 'Info' : x.ok ? 'OK' : 'FEHLT';
+      z.className = x.ok === null ? '' : x.ok ? 'ok' : 'schlecht';
+    }
+    const p = s.akku_prozent;
+    document.getElementById('akkugross').textContent = s.akku == null ? 'Akku: keine Daten'
+      : 'Akku: ' + Number(s.akku).toFixed(2) + ' V  (ca. ' + p + ' %)';
+    const bal = document.getElementById('akkubalken');
+    bal.style.width = (p || 0) + '%';
+    bal.style.background = p == null ? '#333' : p < 25 ? 'var(--rot)' : p < 50 ? 'var(--gelb)' : 'var(--gruen)';
+    document.getElementById('akkuwarnung').hidden = !(s.akku != null && s.akku < s.akku_warnung);
+    chip('c-ki', 'KI: ' + (s.ki ? 'an' : 'aus'), s.ki ? true : null);
+    document.getElementById('statuszeile').textContent = s.status || (s.fahren ? 'startet ...' : 'Fahrprogramm aus');
+    document.getElementById('fahren_info').textContent = s.fahren_info && s.fahren ? s.fahren_info : '';
+    document.getElementById('objekte').textContent = s.objekte.length
+      ? s.objekte.map(o => `${o.im_weg ? 'IM WEG  ' : '        '}${o.name}  ${Math.round(o.sicher * 100)} %`).join('\n')
+      : 'nichts erkannt';
+  } catch (e) {
+    chip('c-fahren', 'Panel-Programm nicht erreichbar', false);
+  }
+}
+setInterval(status, 500);
+status();
+</script>
+</body>
+</html>
