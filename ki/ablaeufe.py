@@ -152,9 +152,10 @@ class Wenden(Ablauf):
     """Auf der Stelle umdrehen (Einbahnstrasse von der falschen Seite), bis die Linie wieder vorne ist."""
     name = 'wenden'
 
-    def __init__(self, jetzt, c, gier):
+    def __init__(self, jetzt, c, gier, grund='Einfahrt verboten -> wende'):
         super().__init__(jetzt, c)
         self.gier0 = gier
+        self.grund = grund
         self._phase(jetzt, 'halt')
 
     def schritt(self, jetzt, w):
@@ -162,7 +163,8 @@ class Wenden(Ablauf):
         if self.phase == 'halt':
             if d >= 0.5:
                 self._phase(jetzt, 'drehen')
-            return befehl('stopp', 'Einfahrt verboten -> wende')
+                self.gier0 = w.get('gier', self.gier0)
+            return befehl('stopp', self.grund)
         gedreht = abs(w.get('gier', self.gier0) - self.gier0)
         linie = w.get('linie') or {}
         # Linie wieder vorne: Roboter steht auf ihr und schaut (fast) in ihre Richtung.
@@ -261,3 +263,31 @@ class Aufheben(Ablauf):
         self.ereignisse.append((f'Aufheben hat nicht geklappt: {grund} -> warte', 'stopp'))
         self.ergebnis = 'fehler'
         return None
+
+
+class Ausweichen(Wenden):
+    """Weg lange versperrt (z. B. anderer Roboter kommt entgegen): etwas zurueck, dann wenden und
+    in der Gegenrichtung weiterfahren. Rueckwaerts nur, wenn der LiDAR hinten frei meldet."""
+    name = 'ausweichen'
+
+    def __init__(self, jetzt, c, gier):
+        super().__init__(jetzt, c, gier, 'Weg versperrt -> weiche aus (zurueck und wenden)')
+        self._phase(jetzt, 'zurueck')
+        self.gefahren = 0.0
+        self.letzte_zeit = jetzt
+
+    def schritt(self, jetzt, w):
+        if self.phase == 'zurueck':
+            c = self.c
+            if 'lidar_hinten' not in w:                # erster Aufruf ohne Wahrnehmung: nur anhalten
+                return befehl('stopp', self.grund)
+            dt, self.letzte_zeit = jetzt - self.letzte_zeit, jetzt
+            hinten = w.get('lidar_hinten')
+            frei = hinten is not None and hinten > c['hinten_frei']
+            if not frei or self.gefahren >= c['zurueck_strecke'] or self.dauer(jetzt) > 6.0:
+                self._phase(jetzt - 0.5, 'halt')        # direkt weiter mit Wenden
+                return befehl('stopp', self.grund)
+            self.gefahren += c['zurueck_tempo'] * dt
+            return befehl('manoever', f'Weiche aus: fahre zurueck ({self.gefahren * 100:.0f} cm)',
+                          manoever={'lin': -c['zurueck_tempo'], 'quer': 0.0, 'dreh': 0.0, 'text': 'zurueck'})
+        return super().schritt(jetzt, w)

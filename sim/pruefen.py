@@ -27,6 +27,7 @@ import karte as K      # noqa: E402
 DAUER = float(os.environ.get('SIM_DAUER', 150))
 SZENARIO = os.environ.get('SIM_SZENARIO', 'normal')   # normal | einsatz
 LOGS = os.environ.get('SIM_LOGS', '/tmp')
+GEGNER = bool(os.environ.get('SIM_GEGNER'))   # anderer Roboter blockiert die Linie -> muss ausweichen
 KARTEN = os.environ.get('SIM_KARTE_ORDNER', os.path.join(LOGS, 'sim_karten'))
 
 
@@ -42,7 +43,8 @@ def main():
     env.setdefault('SMARTCITY_ARM_YAML', os.path.join(REPO, 'sim', 'arm_sim.yaml'))
     cfg = ['--params-file', os.path.join(REPO, 'config', 'roboter.yaml')]
     prozesse = [
-        starte([sys.executable, os.path.join(REPO, 'sim', 'simulator.py')], 'simulator', env),
+        starte([sys.executable, os.path.join(REPO, 'sim', 'simulator.py')]
+               + (['--ros-args', '-p', 'gegner:=true'] if GEGNER else []), 'simulator', env),
         starte([sys.executable, os.path.join(REPO, 'ki', 'zentrale.py'), '--ros-args'] + cfg, 'ki', env),
         starte([sys.executable, os.path.join(REPO, 'line_follower', 'line_follower.py'), '--ros-args'] + cfg +
                ['-p', 'drive:=true', '-p', 'show:=false'], 'linienfolger', env),
@@ -123,6 +125,15 @@ def auswerten(zustaende, ereignisse, karte=()):
     check('genau auf der Linie (auch in Kurven)', abw < 0.04,
           f'(groesste Abweichung {abw * 100:.1f} cm, Mittel {mittel * 100:.1f} cm)')
     check('Linie nie verloren', abw < 0.08)
+
+    if GEGNER:   # nur Ausweichen pruefen
+        gegner = welt.pose_bei(1.75)
+        naechster = min(math.hypot(z['x'] - gegner[0], z['y'] - gegner[1]) for z in zustaende)
+        check('anderen Roboter nicht angefahren', naechster > 0.25, f'(naechster Abstand Mitte-Mitte {naechster * 100:.0f} cm)')
+        zurueck = [z for z in zustaende if not z['vorwaerts'] and z['v'] > 0.05]
+        check('nach Wartezeit ausgewichen (gewendet, faehrt in Gegenrichtung)', len(zurueck) > 20)
+        print('\nAlles in Ordnung.' if not fehler else f'\n{fehler} Pruefung(en) fehlgeschlagen.')
+        return 1 if fehler else 0
 
     # Ampel
     rot_vor = [vor(z, welt.ampel_s) for z in hin if z['ampel'] == 'rot']

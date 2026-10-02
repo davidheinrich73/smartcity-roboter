@@ -131,7 +131,8 @@ class Zentrale(Node):
         self.befehl = {'aktion': 'stopp', 'faktor': 0.0, 'grund': 'KI startet ...', 'arm': None}
         self.ki_ms = 0.0
         self.szenario = self.p('szenario')
-        self.boden = Bodenmodell(self.kamera_cfg)
+        # Tiefenkamera prueft denselben Fahrweg wie der LiDAR (halbe Fahrschlauch-Breite)
+        self.boden = Bodenmodell(self.kamera_cfg, {'weg_breite': self.p('fahrschlauch_breite') / 2})
         self.ampel_werte = lade_ampel_werte()
 
         self.yolo, self.yolo_fehler = None, ''
@@ -228,6 +229,14 @@ class Zentrale(Node):
         fahr, gier = self.arm_beobachter.kamera(self.posen, time.time())
         ok = fahr and self.entscheider.arm_in_fahrstellung
         return ok, (0.0 if ok else gier)
+
+    def lidar_hinten(self):
+        """Frei nach hinten (m) im Streifen der Roboterbreite, None = keine LiDAR-Daten (dann nie rueckwaerts)."""
+        if self.lidar_xy is None or self.lidar_d is None:
+            return None
+        xy = self.lidar_xy
+        hinten = xy[(xy[:, 0] < -0.05) & (np.abs(xy[:, 1]) < self.p('fahrschlauch_breite') / 2)]
+        return float(-hinten[:, 0].max()) if len(hinten) else 5.0
 
     def weg_voraus(self):
         """Linie vor dem Roboter vom Linienfolger (fuer den Fahrschlauch) oder None = geradeaus."""
@@ -385,6 +394,7 @@ class Zentrale(Node):
         w['lidar'], lid_obj, w['lidar_breit'] = self.lidar_pruefen()
         self.lidar_d = w['lidar']
         w['lidar_xy'] = self.lidar_xy if w['lidar'] is not None else None
+        w['lidar_hinten'] = self.lidar_hinten()
         w['gier'] = self.gier
         st = self.linie_status
         # Faehrt das Fahrprogramm wirklich? Nur dann darf die KI den Arm bewegen (nicht im TEST, nicht nach STOPP)

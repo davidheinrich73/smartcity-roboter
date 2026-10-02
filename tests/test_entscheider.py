@@ -259,6 +259,26 @@ ok = 'nur waehrend der Fahrt' in l.e.kommando(l.t, 'umschauen')
 fehler += not ok
 print(f"{'OK  ' if ok else 'FEHLER'} Umschauen im TEST-Modus abgelehnt")
 
+# ---------------- Gegenseitiges Blockieren (z. B. zwei Roboter) ----------------
+l = Lauf()
+gegner = {'lidar': 0.3, 'objekte': [], 'tiefe_hindernis': True, 'lidar_hinten': 2.0}
+b = l.schritt(100, **gegner)                     # 10 s: wartet noch
+ok1 = b['aktion'] == 'stopp' and l.e.ablauf is None
+aktionen = [l.schritt(1, **gegner)['aktion'] for _ in range(160)]   # bis 26 s
+ok2 = 'manoever' in aktionen
+erstes = next((l2 for l2 in range(len(aktionen)) if aktionen[l2] == 'manoever'), None)
+fehler += not (ok1 and ok2)
+print(f"{'OK  ' if ok1 and ok2 else 'FEHLER'} Weg lange versperrt -> nach Zufallszeit ausweichen "
+      f"(nach {10 + (erstes or 0) / 10:.1f} s)")
+l = Lauf()
+for _ in range(300):
+    b = l.schritt(1, lidar=0.3, tiefe_hindernis=True, lidar_hinten=0.1)
+    if b['aktion'] == 'manoever':
+        break
+ok = b['aktion'] == 'manoever' and b['manoever']['lin'] >= 0
+fehler += not ok
+print(f"{'OK  ' if ok else 'FEHLER'} hinten nicht frei -> nicht rueckwaerts, nur wenden ({b['grund']})")
+
 print()
 print('Alle Tests bestanden.' if not fehler else f'{fehler} Test(s) fehlgeschlagen.')
 sys.exit(1 if fehler else 0)
