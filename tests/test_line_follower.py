@@ -32,15 +32,15 @@ def scan(abstand, index_vorne=180):
                                  range_min=0.05, range_max=12.0)
 
 
-def gerade_linie(n, jetzt):
+def gerade_linie(n):
     # gerade Linie direkt vor dem Roboter ins Linien-Gedaechtnis legen
-    n.gedaechtnis.hinzufuegen([(0.05 + 0.02 * k, 0.0) for k in range(30)], jetzt)
+    n.gedaechtnis.hinzufuegen([(0.05 + 0.02 * k, 0.0) for k in range(30)])
 
 
 def neu():
     n = lf.LineFollower()
     jetzt = time.time()
-    gerade_linie(n, jetzt)
+    gerade_linie(n)
     n.bild_zeit = jetzt
     n.ki = (jetzt, {'aktion': 'fahren', 'faktor': 1.0, 'grund': 'Weg frei'})
     n.on_scan(scan(1.0), '/scan0', 0)

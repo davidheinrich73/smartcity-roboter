@@ -83,6 +83,7 @@ class LineFollower(Node):
         self.lenkung = linie.Lenkung(cfg)
         self.gedaechtnis = linie.Gedaechtnis()
         self.linie_gesehen = False
+        self.kamera_linie = (None, None)  # Linie nur nach Kamerabild: seitlich (m), Richtung (rad)
         self.bild_zeit = 0.0
         self.bild_zaehler, self.fps, self.fps_zeit = 0, 0.0, time.time()
         self.scans = {}
@@ -161,13 +162,20 @@ class LineFollower(Node):
     def on_image(self, msg):
         img = self.bridge.imgmsg_to_cv2(msg, 'bgr8')
         jetzt = time.time()
+        # Schaut die Kamera gerade woanders hin (KI dreht den Arm zum Umschauen/Greifen)? Dann passt die
+        # Umrechnung auf den Boden nicht -> Bild nicht ins Linien-Gedaechtnis (Roboter steht dabei).
+        ki_zeit, ki = self.ki
+        kamera_weg = bool(ki) and jetzt - ki_zeit < 1.0 and ki.get('kamera_ok') is False
         with self.lock:
-            ziel = self.gedaechtnis.linie(jetzt, 0.3)
+            ziel = self.gedaechtnis.linie(0.3)
             self.sucher.erwartung = ziel['ziel'] if ziel['gefunden'] else None
         erg = self.sucher.suche(img)
+        if kamera_weg:
+            erg.update({'gefunden': False, 'boden': [], 'punkte': []})
         with self.lock:
-            self.gedaechtnis.hinzufuegen(erg['boden'], jetzt)
+            self.gedaechtnis.hinzufuegen(erg['boden'])
             self.linie_gesehen = erg['gefunden']
+            self.kamera_linie = (erg.get('quer'), erg.get('kurs')) if erg['gefunden'] else (None, None)
             self.bild_zeit = jetzt
             self.bild_zaehler += 1
             if jetzt - self.fps_zeit >= 1.0:
@@ -204,8 +212,8 @@ class LineFollower(Node):
         jetzt = time.time()
         with self.lock:
             bild_zeit = self.bild_zeit
-            ziel = self.gedaechtnis.linie(jetzt, self.p('vorausschau'))
-            lokal = self.gedaechtnis.lokal(jetzt)
+            ziel = self.gedaechtnis.linie(self.p('vorausschau'))
+            lokal = self.gedaechtnis.lokal()
         grund = self.notbremse()
         ki_zeit, ki = self.ki
         manoever = ki.get('manoever') if (ki and ki.get('aktion') == 'manoever' and jetzt - ki_zeit < 0.6) else None
@@ -257,12 +265,18 @@ class LineFollower(Node):
         else:
             self.letzter_cmd = (0.0, 0.0, 0.0)  # Testmodus: Roboter bewegt sich nicht
         with self.lock:
-            lokal = self.gedaechtnis.lokal(jetzt)
+            lokal = self.gedaechtnis.lokal()
+            weg = self.gedaechtnis.weg()
         self.pub_status.publish(String(data=json.dumps({
             'status': status, 'drive': self.p('drive'), 'linear': round(lin, 3), 'quer': round(quer, 3),
             'angular': round(dreh, 3), 'fps': round(self.fps, 1), 'speed': self.p('speed'),
             'linie': self.linie_gesehen or lokal is not None, 'linie_kamera': self.linie_gesehen,
-            'linie_quer': None if lokal is None else round(lokal['quer'], 3)})))
+            'linie_quer': None if lokal is None else round(lokal['quer'], 3),
+            'linie_kurs': None if lokal is None else round(lokal['kurs'], 3),
+            'kamera_quer': None if self.kamera_linie[0] is None else round(self.kamera_linie[0], 3),
+            'kamera_kurs': None if self.kamera_linie[1] is None else round(self.kamera_linie[1], 3),
+            'kruemmung': None if lokal is None else round(lokal['kruemmung'], 2),
+            'weg': weg})))   # Linie vor dem Roboter (fuer den LiDAR-Fahrschlauch der KI)
         self.get_logger().info(status, throttle_duration_sec=1.0)
 
 

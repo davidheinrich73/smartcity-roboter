@@ -149,6 +149,11 @@ class LinienSucher:
         erg.update({'gefunden': True, 'boden': boden, 'punkte': [(float(p[0][0]), int(p[0][1])) for p in pts]})
         naechster = min(boden, key=lambda b: b[0])
         erg['fehler'] = max(-1.0, min(1.0, -naechster[1] / 0.15))
+        # Gerade durch die Punkte: wo laege die Linie am Roboter (quer) und in welche Richtung zeigt sie (kurs)?
+        bx, by = np.array(boden).T
+        if np.ptp(bx) > 0.05:
+            steigung, quer = np.polyfit(bx, by, 1)
+            erg['quer'], erg['kurs'] = float(quer), float(math.atan(steigung))
         return erg
 
 
@@ -157,32 +162,42 @@ class Gedaechtnis:
 
     So kennt der Roboter die Linie auch direkt UNTER sich (die Kamera sieht nur 25-60 cm voraus)
     und kann zwischen zwei Kamerabildern weiterlenken.
+    Punkte altern nur beim FAHREN (im Stand und beim Drehen auf der Stelle 10x langsamer): Haelt der
+    Roboter mitten in einer engen Kurve (Kamera sieht dort die Linie nicht) oder wendet er, weiss er
+    danach trotzdem noch, wo sie ist.
     """
 
-    def __init__(self, max_alter=4.0):
+    def __init__(self, max_alter=6.0):
         self.pose = [0.0, 0.0, 0.0]     # eigene Position durch Mitrechnen (nur kurzfristig genau)
-        self.punkte = np.zeros((0, 3))  # x, y (im Mitrechen-System), Zeit
-        self.max_alter = max_alter
+        self.punkte = np.zeros((0, 3))  # x, y (im Mitrechen-System), Fahrzeit beim Sehen
+        self.max_alter = max_alter      # Sekunden FAHRZEIT
+        self.uhr = 0.0                  # Fahrzeit (laeuft im Stand/beim Drehen nur 10x langsamer)
 
     def bewegen(self, v, dreh, dt, quer=0.0):
         x, y, w = self.pose
         self.pose = [x + (v * math.cos(w) - quer * math.sin(w)) * dt,
                      y + (v * math.sin(w) + quer * math.cos(w)) * dt, w + dreh * dt]
+        faehrt = abs(v) >= 0.005 or abs(quer) >= 0.005
+        self.uhr += dt * (1.0 if faehrt else 0.1)
 
     def _zu_roboter(self, p):
         x, y, w = self.pose
         dx, dy = p[:, 0] - x, p[:, 1] - y
         return np.stack([math.cos(w) * dx + math.sin(w) * dy, -math.sin(w) * dx + math.cos(w) * dy], axis=1)
 
-    def hinzufuegen(self, boden, jetzt):
+    def _frisch(self):
+        return self.punkte[self.punkte[:, 2] > self.uhr - self.max_alter]
+
+    def hinzufuegen(self, boden):
+        """boden: Linienpunkte (x, y) in m, so wie die Kamera sie gerade sieht."""
         x, y, w = self.pose
-        alt = self.punkte[self.punkte[:, 2] > jetzt - self.max_alter]
+        alt = self._frisch()
         if len(alt):
             r = self._zu_roboter(alt)
-            alt = alt[r[:, 0] > -0.15]          # weit hinter dem Roboter -> vergessen
+            alt = alt[r[:, 0] > -0.30]          # weit hinter dem Roboter -> vergessen (30 cm bleiben: Wenden)
         if len(boden) > 25:   # die Punkte liegen dicht -> 25 je Bild reichen
             boden = [boden[i] for i in np.linspace(0, len(boden) - 1, 25).astype(int)]
-        neu = np.array([[x + math.cos(w) * bx - math.sin(w) * by, y + math.sin(w) * bx + math.cos(w) * by, jetzt]
+        neu = np.array([[x + math.cos(w) * bx - math.sin(w) * by, y + math.sin(w) * bx + math.cos(w) * by, self.uhr]
                         for bx, by in boden]) if boden else np.zeros((0, 3))
         if len(neu) and len(alt):
             # Was die Kamera gerade sieht, ersetzt alte Punkte im selben Bereich
@@ -190,7 +205,7 @@ class Gedaechtnis:
             alt = alt[r[:, 0] < min(b[0] for b in boden)]   # naeher als das, was sie gerade sieht
         self.punkte = np.vstack([alt, neu])[-3000:]
 
-    def lokal(self, jetzt):
+    def lokal(self):
         """Linie direkt am Roboter: Abstand, Richtung und Kruemmung, oder None (zu wenig Punkte).
 
         Die Punkte um den Roboter werden zuerst entlang ihrer Hauptrichtung ausgerichtet
@@ -198,8 +213,7 @@ class Gedaechtnis:
         """
         if len(self.punkte) < 5:
             return None
-        frisch = self.punkte[self.punkte[:, 2] > jetzt - self.max_alter]
-        r = self._zu_roboter(frisch)
+        r = self._zu_roboter(self._frisch())
         nah = r[(np.hypot(r[:, 0], r[:, 1]) < 0.18) & (r[:, 0] > -0.12)]
         if len(nah) < 5:
             return None
@@ -214,12 +228,29 @@ class Gedaechtnis:
         return {'quer': float(a), 'kurs': float(math.atan2(t[1], t[0]) + math.atan(b)),
                 'kruemmung': float(2 * c2 / (1 + b * b) ** 1.5)}
 
-    def linie(self, jetzt, vorausschau=0.12):
+    def weg(self, bis=0.8, schritt=0.05):
+        """Linie vor dem Roboter als Punktfolge [(x, y), ...] (alle 'schritt' m Abstand vom Roboter ein Punkt),
+        z. B. fuer den LiDAR-Fahrschlauch der KI. Leer, wenn keine Linie bekannt ist."""
+        frisch = self._frisch()
+        if len(frisch) == 0:
+            return []
+        r = self._zu_roboter(frisch)
+        r = r[r[:, 0] > -0.05]
+        d = np.hypot(r[:, 0], r[:, 1])
+        aus = []
+        for ring in np.arange(schritt, bis + 1e-6, schritt):
+            im_ring = r[np.abs(d - ring) < schritt / 2]
+            if len(im_ring):
+                p = np.median(im_ring, axis=0)
+                aus.append((round(float(p[0]), 3), round(float(p[1]), 3)))
+        return aus
+
+    def linie(self, vorausschau=0.12):
         """Zielpunkt auf der gemerkten Linie, ca. 'vorausschau' Meter vom Roboter entfernt.
-        Rueckgabe: dict gefunden, ziel (x, y im Roboter-System), alter (s)."""
+        Rueckgabe: dict gefunden, ziel (x, y im Roboter-System), alter (s Fahrzeit)."""
         if len(self.punkte) == 0:
             return {'gefunden': False}
-        frisch = self.punkte[self.punkte[:, 2] > jetzt - self.max_alter]
+        frisch = self._frisch()
         if len(frisch) == 0:
             return {'gefunden': False}
         r = self._zu_roboter(frisch)
@@ -235,7 +266,8 @@ class Gedaechtnis:
             ziel = vorne[d > vorausschau][np.argmin(d[d > vorausschau])]       # naechster dahinter
         else:
             ziel = vorne[np.argmax(d)]                                          # weitester, den es gibt
-        return {'gefunden': True, 'ziel': (float(ziel[0]), float(ziel[1])), 'alter': float(jetzt - frisch[:, 2].max())}
+        alter = float(self.uhr - frisch[:, 2].max())
+        return {'gefunden': True, 'ziel': (float(ziel[0]), float(ziel[1])), 'alter': alter}
 
 
 class Lenkung:
