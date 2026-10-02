@@ -51,9 +51,10 @@ import arm as armlib  # noqa: E402
 from tiefe import Bodenmodell        # noqa: E402
 from entscheider import Entscheider, STANDARD as KI_STANDARD  # noqa: E402
 
-# Diese Dinge fuehren zum Anhalten, wenn sie im Weg sind
-STOPP_NAMEN = ['Person', 'Fahrrad', 'Auto', 'Motorrad', 'Bus', 'LKW', 'Hund', 'Katze', 'Teddy',
-               'Ball', 'Flasche', 'Tasse', 'Rucksack', 'Koffer', 'Stuhl']
+# Diese Dinge fuehren zum Anhalten, wenn die Kamera-KI sie im Weg sieht. Nur Verkehrsteilnehmer:
+# Moebel/Gegenstaende (Stuhl, Flasche ...) erkennt YOLO oft falsch, z. B. die schwarze Kurve als "Stuhl".
+# Echte Hindernisse auf der Strasse finden LiDAR und Tiefenkamera trotzdem.
+STOPP_NAMEN = ['Person', 'Fahrrad', 'Auto', 'Motorrad', 'Bus', 'LKW', 'Hund', 'Katze', 'Teddy']
 FARBE_BGR = {'rot': (0, 0, 255), 'gelb': (0, 220, 255), 'gruen': (0, 200, 0)}
 AKTION_BGR = {'fahren': (60, 170, 60), 'langsam': (0, 170, 230), 'stopp': (40, 40, 220)}
 
@@ -80,7 +81,8 @@ class Zentrale(Node):
         dp('imgsz', 320)
         dp('kerne', 2)                  # Prozessorkerne fuer die KI
         dp('rate', 8.0)                 # KI-Bilder pro Sekunde (hoechstens)
-        dp('min_conf', 0.35)            # Mindest-Sicherheit der KI
+        dp('min_conf', 0.35)            # Mindest-Sicherheit der KI (zum Anzeigen)
+        dp('weg_min_conf', 0.5)         # so sicher muss sie sein, damit "im Weg" zum Anhalten fuehrt
         dp('image_topic', '/camera/color/image_raw')
         dp('depth_topic', '/camera/depth/image_raw')
         dp('tiefe_nutzen', True)
@@ -283,7 +285,8 @@ class Zentrale(Node):
         for o in objekte:
             x, y, bw, bh = o['box']
             mitte = (x + bw / 2) / w
-            o['im_weg'] = bool(o['name'] in STOPP_NAMEN and self.p('weg_links') <= mitte <= self.p('weg_rechts')
+            o['im_weg'] = bool(o['name'] in STOPP_NAMEN and o['sicher'] >= self.p('weg_min_conf')
+                               and self.p('weg_links') <= mitte <= self.p('weg_rechts')
                                and (y + bh) / h >= self.p('weg_unten_min') and bh / h >= self.p('weg_min_hoehe'))
             if o['name'] == 'Ampel' and bh / h >= self.p('ampel_min_hoehe'):
                 o['farbe'] = ampel.farbe_in_box(img, o['box'])
