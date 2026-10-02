@@ -1,50 +1,73 @@
 #!/bin/bash
-# Startet ALLES: Kamera, KI-Erkennung und das Control-Panel im Vollbild.
-# Wird vom Desktop-Symbol "SmartCity Panel" aufgerufen (siehe installieren.sh).
-# Browser schliessen (oder "Panel beenden") = Roboter haelt an, alles wird beendet.
-# Vom Laptop erreichbar machen (Vorsicht, dann kann jeder im Netz fahren):  scripts/panel.sh --netz
+# Startet ALLES: Kamera, KI-Zentrale und das Control-Panel.
+# Wird vom Dock-/Desktop-Symbol "SmartCity Panel" aufgerufen (siehe installieren.sh).
+#
+# Anzeige, in dieser Reihenfolge:
+#   1. eigenes Panel-Fenster (ohne Browser)  -> Fenster schliessen = alles aus, Roboter haelt an
+#   2. sonst ein Browser                      -> zum Beenden DIESES Terminal schliessen oder
+#                                                im Panel unter System "Panel beenden"
+# Fehlt beides: scripts/browser_installieren.sh
+# Laptop-Zugriff gleich erlauben (Vorsicht):  scripts/panel.sh --netz
 source "$(dirname "$0")/env.sh"
 export DISPLAY="${DISPLAY:-:0}"
 PORT=8080
 URL="http://localhost:$PORT"
 
 if curl -s -o /dev/null "$URL/api/status"; then
-    echo "Panel laeuft schon, oeffne nur den Browser."
-    LAEUFT_SCHON=1
+    echo "Panel laeuft schon, oeffne nur die Anzeige."
 else
-    echo "Starte Panel (Kamera und KI starten automatisch mit) ..."
+    echo "Starte Panel (Kamera und KI-Zentrale starten automatisch mit) ..."
     python3 "$REPO_DIR/panel/panel.py" --port "$PORT" --autostart "$@" &
     PANEL=$!
-    # Beim Beenden dieses Skripts (auch Fenster schliessen) das Panel sauber beenden
-    trap 'kill -INT $PANEL 2>/dev/null; wait $PANEL 2>/dev/null' EXIT
-    for _ in $(seq 30); do
+    # Beim Beenden dieses Skripts (auch Terminal schliessen) das Panel sauber beenden
+    trap 'kill -TERM $PANEL 2>/dev/null; wait $PANEL 2>/dev/null' EXIT
+    for _ in $(seq 40); do
         curl -s -o /dev/null "$URL/api/status" && break
         kill -0 $PANEL 2>/dev/null || { echo "Panel ist abgestuerzt, siehe Meldungen oben."; exit 1; }
         sleep 0.5
     done
 fi
 
-# Browser suchen. Eigenes Profil -> eigenes Fenster, Skript wartet, bis es geschlossen wird.
-for B in chromium-browser chromium google-chrome firefox; do
-    command -v "$B" >/dev/null || continue
-    ECHT=$(readlink -f "$(command -v "$B")")
-    PROFIL="$HOME/.cache/smartcity-panel-$B"
-    # Snap-Programme duerfen nicht in versteckte Ordner schreiben
-    if [[ "$ECHT" == /snap/* || "$ECHT" == /usr/bin/snap ]]; then
-        PROFIL="$HOME/snap/${B%-browser}/common/smartcity-panel"
-    fi
-    mkdir -p "$PROFIL"
-    echo "Oeffne $URL mit $B (Vollbild verlassen: F11, schliessen: Alt+F4)"
-    if [ "$B" = firefox ]; then
-        firefox --new-instance --profile "$PROFIL" --kiosk "$URL"
-    else
-        "$B" --user-data-dir="$PROFIL" --app="$URL" --start-fullscreen --no-first-run --noerrdialogs
-    fi
-    [ -n "$LAEUFT_SCHON" ] && exit 0
-    echo "Browser geschlossen -> Panel wird beendet, Roboter haelt an."
+# 1. Eigenes Fenster (WebKit)
+if python3 -c "import gi; gi.require_version('Gtk', '3.0')" 2>/dev/null && \
+   python3 -c "import gi
+for v in ('4.1', '4.0'):
+    try: gi.require_version('WebKit2', v); break
+    except ValueError: pass
+from gi.repository import WebKit2" 2>/dev/null; then
+    echo "Oeffne Panel-Fenster (F11 = Vollbild an/aus, Strg+Q = schliessen)"
+    python3 "$REPO_DIR/panel/fenster.py" "$URL"
+    echo "Fenster geschlossen -> Panel wird beendet, Roboter haelt an."
     exit 0
+fi
+
+# 2. Browser (laeuft unabhaengig, das Panel laeuft weiter, bis dieses Terminal zu ist)
+GEOEFFNET=""
+for B in epiphany-browser epiphany firefox falkon chromium-browser chromium google-chrome; do
+    command -v "$B" >/dev/null || continue
+    echo "Oeffne $URL mit $B ..."
+    "$B" "$URL" >/dev/null 2>&1 &
+    BPID=$!
+    sleep 6
+    # Ein Browser, der sich sofort wieder beendet, ist kaputt (z. B. Chromium-Snap auf dem Jetson)
+    # ODER hat die Seite an ein schon offenes Fenster uebergeben. Beides ist ok, wenn eins offen ist.
+    if kill -0 $BPID 2>/dev/null || pgrep -f "$B" >/dev/null; then
+        GEOEFFNET=$B
+        break
+    fi
+    echo "  $B hat sich sofort beendet (kaputt?). Naechster Browser ..."
 done
 
-echo "Kein Browser gefunden. Panel im Browser oeffnen: $URL"
-echo "Beenden: Strg+C"
-wait
+echo
+if [ -n "$GEOEFFNET" ]; then
+    echo "Panel ist offen in $GEOEFFNET."
+else
+    echo "Kein funktionierender Browser gefunden -> scripts/browser_installieren.sh"
+fi
+echo "Adresse am Roboter: $URL"
+for IP in $(hostname -I); do
+    [[ "$IP" == *.*.*.* ]] && echo "Adresse vom Laptop:  http://$IP:$PORT  (im Panel unter System Laptop-Zugriff erlauben)"
+done
+echo
+echo ">>> Dieses Fenster offen lassen. Schliessen oder Strg+C = alles aus, Roboter haelt an. <<<"
+[ -n "$PANEL" ] && wait $PANEL

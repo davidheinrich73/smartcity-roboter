@@ -23,8 +23,10 @@ COCO = ['Person', 'Fahrrad', 'Auto', 'Motorrad', 'Flugzeug', 'Bus', 'Zug', 'LKW'
 
 
 class Yolo:
-    def __init__(self, modell, groesse=320, namen=None):
-        """modell: Pfad zur .onnx-Datei, groesse: Bildgroesse beim Export (imgsz)."""
+    def __init__(self, modell, groesse=320, namen=None, kerne=2):
+        """modell: Pfad zur .onnx-Datei, groesse: Bildgroesse beim Export (imgsz).
+        kerne: so viele Prozessorkerne darf die KI benutzen. Mehr = schneller, aber dann
+        bleibt fuer Linienfolger und Panel zu wenig uebrig (Roboter ruckelt)."""
         self.groesse = groesse
         self.namen = namen or COCO
         # Weg 1: onnxruntime (funktioniert mit jeder OpenCV-Version, evtl. mit Grafikkarte)
@@ -33,12 +35,16 @@ class Yolo:
             import onnxruntime as ort
             wunsch = ['TensorrtExecutionProvider', 'CUDAExecutionProvider', 'CPUExecutionProvider']
             da = ort.get_available_providers()
-            self.sess = ort.InferenceSession(modell, providers=[p for p in wunsch if p in da])
+            opt = ort.SessionOptions()
+            opt.intra_op_num_threads = kerne
+            opt.inter_op_num_threads = 1
+            self.sess = ort.InferenceSession(modell, sess_options=opt, providers=[p for p in wunsch if p in da])
             self.eingang = self.sess.get_inputs()[0].name
             self.backend = 'onnxruntime ' + self.sess.get_providers()[0].replace('ExecutionProvider', '')
             self.net = None
         except ImportError:
             self.sess = None
+            cv2.setNumThreads(kerne)
             self.net = cv2.dnn.readNetFromONNX(modell)
             self.backend = 'OpenCV CPU'
             try:

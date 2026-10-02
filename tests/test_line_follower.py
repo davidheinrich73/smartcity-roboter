@@ -1,46 +1,85 @@
 #!/usr/bin/env python3
-# Testet LiDAR-Notbremse und Stoppschild-Ablauf des Linienfolgers ohne ROS.
+# Testet, wann der Linienfolger faehrt und wann nicht - ohne ROS (mit Attrappen).
 # Aufruf: python3 tests/test_line_follower.py
-import os, sys, math, time, types
+# Die Zusammenarbeit mit KI und Simulator testet: scripts/simulation.sh pruefen (braucht ROS 2)
+import math
+import os
+import sys
+import time
+import types
+
 HIER = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HIER, 'attrappen')); sys.path.insert(0, os.path.join(HIER, '..', 'line_follower'))
-import rclpy.node as rn
-# Parameter-Unterstuetzung fuer die Attrappe
-def declare(self, n, v): self._p = getattr(self, '_p', {}); self._p[n] = v
-def get(self, n): return types.SimpleNamespace(value=self._p[n])
-rn.Node.declare_parameter = declare; rn.Node.get_parameter = get
-import line_follower as lf
-n = lf.LineFollower()
-def scan(front_r, other=2.0, idx_front=180):
-    r = [other]*360; 
-    for k in range(idx_front-5, idx_front+6): r[k] = front_r
-    return types.SimpleNamespace(ranges=r, angle_min=-math.pi, angle_increment=2*math.pi/360, range_min=0.05, range_max=12.0)
-ok = True
-def check(name, got, want):
-    global ok; good = (got is not None) == want; ok &= good
-    print('OK  ' if good else 'FEHLER', name, '->', got)
-check('kein LiDAR -> Stopp', n.obstacle(), True)
-n.on_scan(scan(1.0), '/scan0', 0); n.on_scan(scan(1.0), '/scan1', 1)
-check('frei (1 m vorne)', n.obstacle(), False)
-n.on_scan(scan(0.2), '/scan0', 0)
-check('Hindernis 20 cm vorne', n.obstacle(), True)
-n.on_scan(scan(0.05), '/scan0', 0)
-check('5 cm = eigener Roboter, ignorieren', n.obstacle(), False)
-n.on_scan(scan(0.2, idx_front=0), '/scan0', 0)
-check('20 cm HINTEN -> kein Stopp', n.obstacle(), False)
-n._p['direction'] = -1.0; n.on_scan(scan(0.2, idx_front=0), '/scan0', 0)
-check('rueckwaerts: 20 cm hinten -> Stopp', n.obstacle(), True)
-n._p['direction'] = 1.0; n._p['scan_front_deg'] = [90.0, 0.0]
-n.on_scan(scan(0.2, idx_front=270), '/scan0', 0)
-check('scan_front_deg=90: Punkt bei +90 Grad -> Stopp', n.obstacle(), True)
-n._p['obstacle_check'] = False
-check('obstacle_check aus', n.obstacle(), False)
-# Stoppschild-Ablauf
-n._p['sign_wait'] = 0.3; n._p['sign_cooldown'] = 0.3
-box = (1, 1, 50, 50)
-r = [n.update_sign(box) for _ in range(3)]
-check('3 Bilder Schild -> warten', True if r[-1] else None, True)
-time.sleep(0.35); check('nach Wartezeit weiterfahren (Schild noch sichtbar)', True if n.update_sign(box) else None, False)
-time.sleep(0.35); r = [n.update_sign(box) for _ in range(3)]
-check('nach Cooldown neues Schild erkannt', True if r[-1] else None, True)
-print('ALLES OK' if ok else 'FEHLER'); sys.exit(0 if ok else 1)
+sys.path.insert(0, os.path.join(HIER, 'attrappen'))
+sys.path.insert(0, os.path.join(HIER, '..', 'line_follower'))
+import line_follower as lf  # noqa: E402
+
+fehler = 0
+
+
+def check(name, ergebnis, faehrt):
+    global fehler
+    lin, ang, status = ergebnis
+    ok = (abs(lin) > 0) == faehrt
+    fehler += not ok
+    print(f"{'OK  ' if ok else 'FEHLER'} {name}: {lin:.2f} m/s - {status}")
+
+
+def scan(abstand, index_vorne=180):
+    r = [2.0] * 360
+    for k in range(index_vorne - 3, index_vorne + 4):
+        r[k] = abstand
+    return types.SimpleNamespace(ranges=r, angle_min=-math.pi, angle_increment=2 * math.pi / 360,
+                                 range_min=0.05, range_max=12.0)
+
+
+def neu():
+    n = lf.LineFollower()
+    jetzt = time.time()
+    n.lenkung, n.bild_zeit = (0.15, 0.1), jetzt
+    n.ki = (jetzt, {'aktion': 'fahren', 'faktor': 1.0, 'grund': 'Weg frei'})
+    n.on_scan(scan(1.0), '/scan0', 0)
+    return n
+
+
+n = neu()
+check('alles frei', n.entscheide(), True)
+n.on_scan(scan(0.10), '/scan0', 0)
+check('Notbremse 10 cm (eigene, ohne KI)', n.entscheide(), False)
+n = neu()
+n.on_scan(scan(0.10, index_vorne=0), '/scan0', 0)
+check('10 cm HINTEN -> faehrt', n.entscheide(), True)
+n = neu()
+n.scans.clear()
+check('kein LiDAR -> Stopp', n.entscheide(), False)
+n = neu()
+n.ki = (time.time() - 2, n.ki[1])
+check('KI antwortet nicht -> Stopp', n.entscheide(), False)
+n = neu()
+n.ki = (time.time(), {'aktion': 'stopp', 'grund': 'Rote Ampel'})
+check('KI sagt stopp', n.entscheide(), False)
+n = neu()
+n.ki = (time.time(), {'aktion': 'langsam', 'faktor': 0.5, 'grund': 'LiDAR unbestaetigt'})
+lin, _, _ = n.entscheide()
+check('KI sagt langsam (halbe Geschwindigkeit)', (lin, 0, f'{lin:.3f} m/s'), True)
+if abs(lin - 0.075) > 0.001:
+    fehler += 1
+    print('FEHLER  langsam ist nicht halb so schnell')
+n = neu()
+n.lenkung = None
+check('keine Linie -> Stopp', n.entscheide(), False)
+n = neu()
+n.bild_zeit = time.time() - 1
+check('keine Kamerabilder -> Stopp', n.entscheide(), False)
+n = neu()
+n._p['ki_pflicht'] = False
+n.ki = (0.0, None)
+check('ohne KI-Pflicht (Test ohne KI)', n.entscheide(), True)
+n = neu()
+n.on_tempo(types.SimpleNamespace(data=0.9))
+check('Tempo vom Panel wird auf 0,5 m/s begrenzt', (n.p('speed'), 0, f"speed={n.p('speed')}"), True)
+if n.p('speed') != 0.5:
+    fehler += 1
+    print('FEHLER  Begrenzung greift nicht')
+
+print('\nAlle Tests bestanden.' if not fehler else f'\n{fehler} Test(s) fehlgeschlagen.')
+sys.exit(1 if fehler else 0)

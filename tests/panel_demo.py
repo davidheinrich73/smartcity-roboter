@@ -1,30 +1,90 @@
 #!/usr/bin/env python3
-# Zeigt das Control-Panel mit ausgedachten Daten, OHNE Roboter und ohne ROS.
+# Zeigt das Control-Panel mit ausgedachten Daten, OHNE Roboter und OHNE ROS.
 # Aufruf: python3 tests/panel_demo.py   dann im Browser: http://localhost:8099
 # Knoepfe wie START tun hier nichts Sinnvolles (es gibt keinen Roboter).
-import os, sys, math, time, threading, types
+# Echte Simulation mit ROS 2: scripts/simulation.sh
+import math
+import os
+import sys
+import threading
+import time
+import types
+
 HIER = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HIER, 'attrappen')); sys.path.insert(0, os.path.join(HIER, '..', 'panel'))
-import numpy as np, cv2, panel
-from http.server import ThreadingHTTPServer
-class A: kamera_topic='/camera/color/image_raw'; tiefe_topic='/camera/depth/image_raw'
-node = panel.PanelNode(A()); pr = panel.Prozesse()
+sys.path.insert(0, os.path.join(HIER, 'attrappen'))
+sys.path.insert(0, os.path.join(HIER, '..', 'panel'))
+import cv2  # noqa: E402
+import numpy as np  # noqa: E402
+import panel  # noqa: E402
+from http.server import ThreadingHTTPServer  # noqa: E402
+
+
+class Args:
+    port = 8099
+    netz = False
+    tiefe_topic = '/camera/depth/image_raw'
+
+
+node = panel.PanelNode(Args())
+prozesse = panel.Prozesse()
+ABLAUF = [  # (Sekunden, aktion, grund, ampel, lidar)
+    (5, 'fahren', 'Weg frei', None, 1.2),
+    (4, 'stopp', 'Rote Ampel -> warte auf Gruen', 'rot', 1.0),
+    (3, 'fahren', 'Weg frei', 'gruen', 1.0),
+    (4, 'langsam', 'LiDAR-Meldung nicht bestaetigt (z. B. Haus am Rand) -> langsam', None, 0.35),
+    (4, 'stopp', 'Hindernis 30 cm, bestaetigt durch Kamera-KI: Person', None, 0.30),
+]
+
+
+def jpeg(text, farbe):
+    img = np.full((480, 640, 3), 200, np.uint8)
+    cv2.line(img, (330, 480), (300, 250), (25, 25, 25), 30)
+    cv2.rectangle(img, (0, 0), (640, 34), farbe, -1)
+    cv2.putText(img, text[:60], (8, 23), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+    return cv2.imencode('.jpg', img)[1].tobytes()
+
+
 def fake():
+    start = time.time()
+    letzte = None
     while True:
-        img = np.full((480,640,3),180,np.uint8); cv2.line(img,(320,480),(300,300),(0,0,0),30)
-        node._set('kamera', types.SimpleNamespace(img=img))
-        d = np.tile(np.linspace(200,2500,640,dtype=np.uint16),(480,1))
-        node._set('tiefe', types.SimpleNamespace(img=d, encoding='16UC1'))
-        for i,t in enumerate(node.scan_topics):
-            r=[1.0+0.5*math.sin(k/20)+i*0.3 for k in range(360)]; r[0:10]=[0.2]*10
-            node._scan(t, types.SimpleNamespace(ranges=r, angle_min=-math.pi, angle_increment=2*math.pi/360, range_min=0.05, range_max=12))
-        node._set('akku', 11.8); node.zaehle('/battery'); node.zaehle('/imu/data_raw')
-        for _ in range(10): node.zaehle('/imu/data_raw'); node.zaehle('/odom_raw')
+        t = (time.time() - start) % sum(a[0] for a in ABLAUF)
+        for dauer, aktion, grund, ampel, d in ABLAUF:
+            if t < dauer:
+                break
+            t -= dauer
+        if (aktion, grund) != letzte:
+            letzte = (aktion, grund)
+            node._ereignis(types.SimpleNamespace(data=panel.json.dumps(
+                {'zeit': time.time(), 'text': f'{aktion.upper()}: {grund}', 'art': aktion})))
+        objekte = [{'name': 'Person', 'sicher': 0.81, 'im_weg': True, 'farbe': None}] if 'Person' in grund else []
+        node._set('ki', {'aktion': aktion, 'faktor': 1.0, 'grund': grund, 'szenario': 'normal',
+                         'ki': 'onnxruntime CPU (Demo)', 'ki_ms': 70, 'lidar': d, 'ampel': ampel,
+                         'ampel_quelle': 'LED-Erkennung', 'stoppschild': False, 'tiefe_hindernis': False,
+                         'objekte': objekte})
+        node._set('lf', {'status': 'Linie: Lenkung +0.05', 'fps': 15, 'linear': 0.15 if aktion != 'stopp' else 0,
+                         'angular': 0.05, 'linie': True, 'speed': 0.15})
+        farbe = {'fahren': (60, 170, 60), 'langsam': (0, 170, 230), 'stopp': (40, 40, 220)}[aktion]
+        node._set('bild_ki', jpeg(f'{aktion.upper()}: {grund}', farbe))
+        node._set('bild_lf', jpeg('Linie erkannt', (120, 80, 40)))
+        node._set('akku', 12.1)
         node._set('agent', True)
-        node._set('lf_status', {'status':'Linie x=310  Abweichung=+10  Lenkung=+0.04'})
-        node._set('ki_objekte', [{'name':'Person','sicher':0.81,'im_weg':True}])
-        time.sleep(0.1)
+        for i, topic in enumerate(node.scan_topics):
+            r = [1.4 + 0.3 * math.cos(2 * (k * math.pi / 180)) for k in range(360)]
+            if i == 0:
+                for k in range(175, 186):
+                    r[k] = d
+            node._scan(topic, types.SimpleNamespace(ranges=r, angle_min=-math.pi, angle_increment=math.pi / 180,
+                                                    range_min=0.05, range_max=12.0))
+        for topic in ('/battery', '/imu/data_raw', '/odom_raw', '/camera/color/camera_info', '/camera/depth/camera_info'):
+            node.zaehle(topic)
+            node.zaehle(topic)
+        time.sleep(0.2)
+
+
 threading.Thread(target=fake, daemon=True).start()
-srv = ThreadingHTTPServer(('127.0.0.1', 8099), panel.mache_handler(node, pr)); srv.daemon_threads=True
-print('Panel-Vorschau: http://localhost:8099  (Strg+C = Ende)')
+handler, _ = panel.mache_handler(node, prozesse)
+srv = ThreadingHTTPServer(('127.0.0.1', Args.port), handler)
+srv.daemon_threads = True
+print(f'Panel-Vorschau: http://localhost:{Args.port}  (Strg+C = Ende)')
 srv.serve_forever()

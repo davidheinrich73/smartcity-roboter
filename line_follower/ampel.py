@@ -29,7 +29,12 @@ STANDARD = {
     'red_peak_min': 230,    # hellster Pixel im Fleck muss mindestens so hell sein
     'red_dark_val': 80,     # Pixel dunkler als das zaehlen als "schwarzes Gehaeuse"
     'red_dark_frac': 0.4,   # so viel der Umgebung muss dunkel sein (0 = Pruefung aus)
+    # Farbtoene der anderen Lampen (gleiche Filter wie Rot). UNGETESTET mit echter Ampel.
+    'yellow_hue_min': 15, 'yellow_hue_max': 35,
+    'green_hue_min': 40, 'green_hue_max': 95,
 }
+
+FARBEN = ('rot', 'gelb', 'gruen')
 
 
 def _ring(hsv_v, mask, x, y, bw, bh):
@@ -44,7 +49,52 @@ def _ring(hsv_v, mask, x, y, bw, bh):
 
 
 def finde_rot(img, cfg):
-    """Sucht eine leuchtende rote LED.
+    """Sucht eine leuchtende rote LED (siehe finde_lampe)."""
+    return finde_lampe(img, cfg, 'rot')
+
+
+def finde_ampel(img, cfg):
+    """Sucht leuchtende rote, gelbe und gruene LEDs.
+
+    Rueckgabe: {'farbe': 'rot' | 'gelb' | 'gruen' | None, 'lampen': {farbe: erg von finde_lampe}}
+    Leuchten mehrere (z. B. Rot + Gelb), zaehlt die vorsichtigere Farbe (Rot vor Gelb vor Gruen).
+    """
+    lampen = {f: finde_lampe(img, cfg, f) for f in FARBEN}
+    farbe = next((f for f in FARBEN if lampen[f]['treffer'] is not None), None)
+    return {'farbe': farbe, 'lampen': lampen}
+
+
+def farbe_in_box(img, box, val_min=200, sat_min=80, min_pixel=6):
+    """Welche Lampe leuchtet in einem Kasten (z. B. Ampel, die die KI gefunden hat)?
+
+    Zaehlt helle, kraeftig farbige Pixel je Farbe. Rueckgabe 'rot' | 'gelb' | 'gruen' | None.
+    """
+    x, y, bw, bh = [int(v) for v in box]
+    h, w = img.shape[:2]
+    teil = img[max(0, y):min(h, y + bh), max(0, x):min(w, x + bw)]
+    if teil.size == 0:
+        return None
+    hsv = cv2.cvtColor(teil, cv2.COLOR_BGR2HSV)
+    c = STANDARD
+    zahl = {}
+    for f in FARBEN:
+        m = sum(cv2.countNonZero(cv2.inRange(hsv, (lo, sat_min, val_min), (hi, 255, 255)))
+                for lo, hi in _farbtoene(c, f))
+        zahl[f] = m
+    beste = max(zahl, key=zahl.get)
+    return beste if zahl[beste] >= min_pixel else None
+
+
+def _farbtoene(c, farbe):
+    if farbe == 'rot':
+        return [(0, int(c['red_hue_max'])), (int(c['red_hue_min2']), 180)]
+    if farbe == 'gelb':
+        return [(int(c['yellow_hue_min']), int(c['yellow_hue_max']))]
+    return [(int(c['green_hue_min']), int(c['green_hue_max']))]
+
+
+def finde_lampe(img, cfg, farbe):
+    """Sucht eine leuchtende LED der Farbe 'rot', 'gelb' oder 'gruen'.
 
     img: Farbbild (BGR), cfg: Dict mit den Werten aus STANDARD.
     Rueckgabe: dict mit
@@ -65,8 +115,9 @@ def finde_rot(img, cfg):
 
     hsv = cv2.cvtColor(part, cv2.COLOR_BGR2HSV)
     s, v = int(c['red_sat_min']), int(c['red_val_min'])
-    rot = cv2.inRange(hsv, (0, s, v), (int(c['red_hue_max']), 255, 255)) | \
-        cv2.inRange(hsv, (int(c['red_hue_min2']), s, v), (180, 255, 255))
+    rot = np.zeros(hsv.shape[:2], np.uint8)  # Name "rot" historisch: Pixel der gesuchten Farbe
+    for lo, hi in _farbtoene(c, farbe):
+        rot |= cv2.inRange(hsv, (lo, s, v), (hi, 255, 255))
     # LED-Mitte ist oft ueberstrahlt (fast weiss). Solche Pixel zaehlen nur,
     # wenn sie direkt an rote Pixel grenzen (sonst wuerde jede Lampe zaehlen).
     hell = cv2.inRange(hsv[:, :, 2], int(c['red_core_val']), 255)
