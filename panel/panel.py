@@ -268,6 +268,12 @@ class PanelNode(Node):
             self.tiefe_sub = None
 
     # ---------------- Ausgaenge ----------------
+    def alter(self, name):
+        """Wie alt (s) ist die letzte Meldung? None = noch nie."""
+        with self.lock:
+            zeit = self.daten.get(name, (None, None))[0]
+        return None if zeit is None else round(time.time() - zeit, 1)
+
     def stillstand(self):
         for _ in range(5):
             self.cmd_pub.publish(Twist())
@@ -337,6 +343,15 @@ def text_bild(text):
     return cv2.imencode('.jpg', bild)[1].tobytes()
 
 
+def log_ende(name, zeilen=8):
+    """Letzte Zeilen des Protokolls eines vom Panel gestarteten Programms (/tmp/panel_<name>.log)."""
+    try:
+        with open(f'/tmp/panel_{name}.log', errors='replace') as f:
+            return ''.join(f.readlines()[-zeilen:]).strip() or '(Protokoll leer)'
+    except OSError:
+        return '(kein Protokoll)'
+
+
 def topics_mit(woerter):
     """ros2 topic list, gefiltert (fuer die Arm-Diagnose). Nur lesen."""
     try:
@@ -387,7 +402,13 @@ def mache_handler(node, prozesse, beenden=None):
             else:
                 hinweis = ''
             node.szenario_pub.publish(String(data=SZENARIEN[node.szenario]['ki']))
+            if 'line_follower' in node.get_node_names():
+                return ('Es laeuft schon ein Linienfolger, der NICHT vom Panel gestartet wurde (alte Version oder '
+                        'scripts/test.sh/fahren.sh). Erst beenden: Terminal -> scripts/stopp.sh, dann nochmal.')
             prozesse.start('fahren', lf_befehl(name == 'start'), 'FAEHRT' if name == 'start' else 'TESTMODUS')
+            time.sleep(2.5)       # sofort wieder beendet? Dann den Grund aus dem Protokoll zeigen
+            if not prozesse.laeuft('fahren'):
+                return 'Linienfolger hat sich sofort beendet:\n' + log_ende('fahren')
             return ('Faehrt los.' if name == 'start' else 'Testmodus: zeigt alles, faehrt nicht.') + hinweis
         if name == 'szenario':
             sz = daten.get('szenario')
@@ -485,6 +506,16 @@ def mache_handler(node, prozesse, beenden=None):
             return 'Panel wird beendet, Roboter haelt an.'
         return f'Unbekannte Aktion {name}'
 
+    def fremde_programme():
+        """Unsere Programme, die laufen, aber NICHT vom Panel gestartet wurden (z. B. alte Version nach Update)."""
+        namen = node.get_node_names()
+        aus = []
+        for knoten, proz, titel in (('line_follower', 'fahren', 'Linienfolger'), ('ki_zentrale', 'ki', 'KI-Zentrale'),
+                                    ('kartograf', 'karte', 'Kartograf')):
+            if knoten in namen and not prozesse.laeuft(proz):
+                aus.append(titel)
+        return aus
+
     def status(lokal):
         akku = node.get('akku', max_alter=5.0)
         posen = armlib.lade_posen()
@@ -492,6 +523,7 @@ def mache_handler(node, prozesse, beenden=None):
             'fahren': prozesse.laeuft('fahren'), 'modus': prozesse.info.get('fahren', ''),
             'ki_prozess': prozesse.laeuft('ki'),
             'lf': node.get('lf', max_alter=1.5), 'ki': node.get('ki', max_alter=1.5),
+            'lf_alter': node.alter('lf'), 'fremde': fremde_programme(),
             'ereignisse': list(node.ereignisse)[:25],
             'akku': akku, 'akku_warnung': AKKU_WARNUNG,
             'akku_prozent': None if akku is None else

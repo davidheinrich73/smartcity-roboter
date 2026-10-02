@@ -9,8 +9,13 @@
 #          'manoever': {'lin', 'quer', 'dreh', 'text'}}
 # w = Wahrnehmung (siehe ki/entscheider.py).
 import math
+import os
+import sys
 
 import numpy as np
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'lib'))
+from lidar import abstand_zum_weg  # noqa: E402
 
 LEBEWESEN = {'Person', 'Hund', 'Katze', 'Pferd', 'Vogel', 'Schaf', 'Kuh', 'Teddy'}
 
@@ -47,6 +52,7 @@ class Zebrastreifen(Ablauf):
         self.mit_arm = bool(posen.get('blick_links') and posen.get('blick_rechts') and posen.get('fahrstellung'))
         self.braucht_arm = self.mit_arm
         self.abstand = abstand      # Zebrastreifen so weit voraus (m), gemessen beim Anhalten
+        self.weg = None             # Linie voraus beim Anhalten (Bereich wird ENTLANG der Strasse geprueft)
         self.jemand = False
         self.runde = 0
         self._phase(jetzt, 'halt')
@@ -58,10 +64,19 @@ class Zebrastreifen(Ablauf):
         # ... oder der LiDAR sieht etwas AUF oder direkt NEBEN dem Zebrastreifen (wartender Fussgaenger).
         # Nur dieser Bereich zaehlt, damit Haeuser und Waende nicht als Fussgaenger gelten.
         xy = w.get('lidar_xy')
+        if self.weg is None and w.get('weg'):
+            self.weg = w['weg']
         if xy is not None:
             xy = np.asarray(xy).reshape(-1, 2)
-            zone = ((xy[:, 0] > self.abstand - 0.10) & (xy[:, 0] < self.abstand + self.c['zebra_tiefe'])
-                    & (np.abs(xy[:, 1]) < self.c['zebra_seite']))
+            if self.weg:
+                # entlang der Linie messen: steht der Roboter (noch) schraeg, zaehlt trotzdem nur der Bereich
+                # am Zebrastreifen, nicht Waende/Haeuser daneben
+                quer, entlang = abstand_zum_weg(xy, self.weg, self.abstand + self.c['zebra_tiefe'] + 0.2)
+                zone = ((entlang > self.abstand - 0.10) & (entlang < self.abstand + self.c['zebra_tiefe'])
+                        & (quer < self.c['zebra_seite']))
+            else:
+                zone = ((xy[:, 0] > self.abstand - 0.10) & (xy[:, 0] < self.abstand + self.c['zebra_tiefe'])
+                        & (np.abs(xy[:, 1]) < self.c['zebra_seite']))
             if zone.any():
                 x, y = xy[zone][np.argmin(xy[zone][:, 0])]
                 seite = 'links' if y > 0 else 'rechts'
@@ -178,6 +193,12 @@ class Wenden(Ablauf):
         if (gedreht >= math.radians(150) and linie_vorne) or gedreht >= math.radians(215):
             self.ereignisse.append((f'Gewendet ({math.degrees(gedreht):.0f} Grad)', 'fahren'))
             self.ergebnis = 'ok'
+            return None
+        if d > 2.5 and gedreht < math.radians(15):
+            # Er soll sich drehen, aber der Lagesensor meldet fast nichts: IMU fehlt/falsch eingebaut oder Raeder
+            # blockiert. Nicht endlos im Kreis drehen -> anhalten.
+            self.ereignisse.append(('Wenden abgebrochen: Lagesensor meldet keine Drehung (IMU/Raeder pruefen)', 'stopp'))
+            self.ergebnis = 'fehler'
             return None
         if d > c['wenden_max_zeit']:
             self.ereignisse.append(('Wenden hat nicht geklappt (Zeit abgelaufen)', 'stopp'))

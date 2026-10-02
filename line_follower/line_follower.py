@@ -37,7 +37,8 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.qos import qos_profile_sensor_data, QoSProfile, ReliabilityPolicy, HistoryPolicy
-from sensor_msgs.msg import Image, CompressedImage, LaserScan
+from sensor_msgs.msg import Image, CompressedImage, LaserScan, Imu
+from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Twist
 from std_msgs.msg import String, Float32
 from cv_bridge import CvBridge
@@ -75,6 +76,13 @@ class LineFollower(Node):
         dp('scan_front_deg', [0.0, 0.0])
         dp('obstacle_half_deg', 30.0)
         dp('notbremse_dist', 0.12)  # naeher (m) -> sofort Stopp
+        # ---- Kamerabilder: wie alt duerfen sie sein? (Aufnahme bis Auswertung) ----
+        dp('bild_alter_langsam', 0.25)  # aelter (s) -> langsamer fahren
+        dp('bild_alter_max', 0.6)       # aelter (s) -> STOPP (sonst lenkt er nach einem veralteten Bild)
+        # ---- eigene Bewegung fuer das Linien-Gedaechtnis ----
+        # auto = Radzaehler (/odom_raw) + Lagesensor (/imu/data_raw), wenn plausibel, sonst die eigenen
+        # Fahrbefehle; 'befehl' = immer Fahrbefehle
+        dp('bewegung', 'auto')
         dp('obstacle_min_range', 0.08)
 
         self.bridge = CvBridge()
@@ -94,6 +102,13 @@ class LineFollower(Node):
         self.letzter_cmd = (0.0, 0.0, 0.0)  # vorwaerts, seitwaerts, drehen
         self.letzte_steuerung = time.time()
         self.anzeige = None              # (Bild, Maske) fuer die Fenster (zeigt der Haupt-Thread)
+        self.bild_alter = 0.0            # Aufnahme bis Auswertung des letzten Bildes (s)
+        self.stempel_ok = True           # passt die Aufnahmezeit im Bild zur Uhr dieses Rechners?
+        self.odom = (0.0, 0.0, 0.0, 0.0)  # (Zeit, vorwaerts, seitwaerts, drehen) gemessen
+        self.imu = (0.0, 0.0)            # (Zeit, Drehrate) gemessen
+        # Plausibilitaet: passt die Messung zur Richtung der Befehle? (Summe Produkt, Anzahl)
+        self.pruef_odom, self.pruef_imu = [0.0, 0], [0.0, 0]
+        self.bewegung_quelle = 'Fahrbefehle'
         self.add_on_set_parameters_callback(self._parameter_geaendert)
 
         # Kamera in eigener Gruppe: eine langsame Bildauswertung blockiert nie die Fahrbefehle
@@ -109,6 +124,8 @@ class LineFollower(Node):
                                      qos_profile_sensor_data, callback_group=scan_gruppe)
         self.create_subscription(String, '/ki/befehl', self.on_ki, 10, callback_group=rest_gruppe)
         self.create_subscription(Float32, '/line_follower/tempo', self.on_tempo, 10, callback_group=rest_gruppe)
+        self.create_subscription(Odometry, '/odom_raw', self.on_odom, qos_profile_sensor_data, callback_group=scan_gruppe)
+        self.create_subscription(Imu, '/imu/data_raw', self.on_imu, qos_profile_sensor_data, callback_group=scan_gruppe)
         self.pub = self.create_publisher(Twist, '/cmd_vel', 10)
         self.pub_status = self.create_publisher(String, '/line_follower/status', 10)
         self.pub_image = self.create_publisher(CompressedImage, '/line_follower/bild/compressed', 1)
@@ -135,6 +152,43 @@ class LineFollower(Node):
         d = lidar.naechster_vorne(msg, fronts[i] if i < len(fronts) else 0.0, self.p('obstacle_half_deg'),
                                   self.p('obstacle_min_range'), rueckwaerts=self.p('direction') < 0)
         self.scans[topic] = (time.time(), d)
+
+    def on_odom(self, msg):
+        t = msg.twist.twist
+        self.odom = (time.time(), t.linear.x, t.linear.y, t.angular.z)
+
+    def on_imu(self, msg):
+        self.imu = (time.time(), msg.angular_velocity.z)
+
+    def bewegung(self, dt):
+        """Eigene Bewegung seit dem letzten Aufruf: (vorwaerts, seitwaerts, drehen) je Sekunde.
+        Gemessen (Radzaehler, Lagesensor) ist genauer als befohlen (Anfahren, Schlupf). Gemessene Werte
+        werden nur benutzt, wenn sie zur Richtung der Fahrbefehle passen (falsch eingebauter Sensor,
+        falsches Vorzeichen -> sonst laege die Linie im Gedaechtnis spiegelverkehrt)."""
+        lin, quer, dreh = self.letzter_cmd
+        if self.p('bewegung') != 'auto':
+            self.bewegung_quelle = 'Fahrbefehle'
+            return lin, quer, dreh
+        jetzt = time.time()
+        quellen = []
+        oz, ov, oq, ow = self.odom
+        if jetzt - oz < 0.3:
+            if abs(lin) > 0.05:
+                self.pruef_odom[0] += ov * lin
+                self.pruef_odom[1] += 1
+            if self.pruef_odom[1] >= 20 and self.pruef_odom[0] > 0:
+                lin, quer = ov, oq
+                quellen.append('Radzaehler')
+        iz, iw = self.imu
+        if jetzt - iz < 0.3:
+            if abs(dreh) > 0.2:
+                self.pruef_imu[0] += iw * dreh
+                self.pruef_imu[1] += 1
+            if self.pruef_imu[1] >= 20 and self.pruef_imu[0] > 0:
+                dreh = iw
+                quellen.append('Lagesensor')
+        self.bewegung_quelle = ' + '.join(quellen) or 'Fahrbefehle'
+        return lin, quer, dreh
 
     def on_ki(self, msg):
         try:
@@ -168,6 +222,10 @@ class LineFollower(Node):
         jetzt = time.time()
         if jetzt - self.bild_zeit < 1.0 / self.p('max_bild_hz') - 0.005:
             return                    # Bild auslassen: entlastet den Rechner (Kamera liefert ~30/s)
+        # Wann wurde das Bild aufgenommen? (Zeitstempel der Kamera, gleiche Uhr wie dieser Rechner)
+        stempel = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        self.stempel_ok = 0.0 <= jetzt - stempel < 5.0
+        aufnahme = stempel if self.stempel_ok else jetzt
         img = self.bridge.imgmsg_to_cv2(msg, 'bgr8')
         # Schaut die Kamera gerade woanders hin (KI dreht den Arm zum Umschauen/Greifen)? Dann passt die
         # Umrechnung auf den Boden nicht -> Bild nicht ins Linien-Gedaechtnis (Roboter steht dabei).
@@ -180,7 +238,9 @@ class LineFollower(Node):
         if kamera_weg:
             erg.update({'gefunden': False, 'boden': [], 'punkte': []})
         with self.lock:
-            self.gedaechtnis.hinzufuegen(erg['boden'])
+            # Punkte dort eintragen, wo der Roboter bei der AUFNAHME stand (Bild kommt verspaetet an)
+            self.gedaechtnis.hinzufuegen(erg['boden'], aufnahme)
+            self.bild_alter = time.time() - aufnahme
             self.linie_gesehen = erg['gefunden']
             self.kamera_linie = (erg.get('quer'), erg.get('kurs')) if erg['gefunden'] else (None, None)
             self.bild_zeit = jetzt
@@ -231,6 +291,8 @@ class LineFollower(Node):
             return 0.0, 0.0, 0.0, grund + ' -> STOPP'
         if jetzt - bild_zeit > 0.5:
             return 0.0, 0.0, 0.0, 'KEINE KAMERABILDER -> STOPP'
+        if self.bild_alter > self.p('bild_alter_max'):
+            return 0.0, 0.0, 0.0, f'KAMERABILDER ZU ALT ({self.bild_alter:.2f} s) -> STOPP (Rechner ueberlastet?)'
         faktor = 1.0
         if self.p('ki_pflicht'):
             if ki is None or jetzt - ki_zeit > 0.6:
@@ -241,6 +303,8 @@ class LineFollower(Node):
                 return self._manoever(manoever, 'KI-Manoever: ')
             faktor = float(ki.get('faktor', 1.0))
         tempo = self.p('speed') * faktor
+        if self.bild_alter > self.p('bild_alter_langsam'):   # Bilder kommen spaet -> langsamer
+            tempo *= 0.5
         v, dreh, status = self.lenkung.berechne(ziel, tempo, jetzt, lokal)
         v *= self.p('direction')
         if ki and ki.get('aktion') == 'langsam':
@@ -260,8 +324,8 @@ class LineFollower(Node):
         self.letzte_steuerung = jetzt
         with self.lock:
             # eigene Bewegung seit dem letzten Befehl ins Linien-Gedaechtnis rechnen
-            lin_alt, quer_alt, dreh_alt = self.letzter_cmd
-            self.gedaechtnis.bewegen(lin_alt, dreh_alt, dt, quer_alt)
+            lin_alt, quer_alt, dreh_alt = self.bewegung(dt)
+            self.gedaechtnis.bewegen(lin_alt, dreh_alt, dt, quer_alt, jetzt)
         lin, quer, dreh, status = self.entscheide()
         self.status_text = status
         if self.p('drive'):
@@ -279,6 +343,8 @@ class LineFollower(Node):
             'angular': round(dreh, 3), 'fps': round(self.fps, 1), 'speed': self.p('speed'),
             'linie': self.linie_gesehen or lokal is not None, 'linie_kamera': self.linie_gesehen,
             'linie_quer': None if lokal is None else round(lokal['quer'], 3),
+            'bild_alter': round(self.bild_alter, 3), 'zeitstempel_ok': self.stempel_ok,
+            'bewegung_quelle': self.bewegung_quelle,
             'linie_kurs': None if lokal is None else round(lokal['kurs'], 3),
             'kamera_quer': None if self.kamera_linie[0] is None else round(self.kamera_linie[0], 3),
             'kamera_kurs': None if self.kamera_linie[1] is None else round(self.kamera_linie[1], 3),

@@ -260,7 +260,7 @@ fehler += not ok
 print(f"{'OK  ' if ok else 'FEHLER'} Umschauen im TEST-Modus abgelehnt")
 
 # ---------------- Gegenseitiges Blockieren (z. B. zwei Roboter) ----------------
-l = Lauf()
+l = Lauf(cfg={'ausweichen': True})
 gegner = {'lidar': 0.3, 'objekte': [], 'tiefe_hindernis': True, 'lidar_hinten': 2.0}
 b = l.schritt(100, **gegner)                     # 10 s: wartet noch
 ok1 = b['aktion'] == 'stopp' and l.e.ablauf is None
@@ -270,7 +270,7 @@ erstes = next((l2 for l2 in range(len(aktionen)) if aktionen[l2] == 'manoever'),
 fehler += not (ok1 and ok2)
 print(f"{'OK  ' if ok1 and ok2 else 'FEHLER'} Weg lange versperrt -> nach Zufallszeit ausweichen "
       f"(nach {10 + (erstes or 0) / 10:.1f} s)")
-l = Lauf()
+l = Lauf(cfg={'ausweichen': True})
 for _ in range(300):
     b = l.schritt(1, lidar=0.3, tiefe_hindernis=True, lidar_hinten=0.1)
     if b['aktion'] == 'manoever':
@@ -278,6 +278,27 @@ for _ in range(300):
 ok = b['aktion'] == 'manoever' and b['manoever']['lin'] >= 0
 fehler += not ok
 print(f"{'OK  ' if ok else 'FEHLER'} hinten nicht frei -> nicht rueckwaerts, nur wenden ({b['grund']})")
+
+l = Lauf()
+aktionen = [l.schritt(1, **gegner)['aktion'] for _ in range(400)]
+ok = 'manoever' not in aktionen and aktionen[-1] == 'stopp'
+fehler += not ok
+print(f"{'OK  ' if ok else 'FEHLER'} Grundbetrieb (ausweichen aus): wartet auch nach 40 s, weicht nicht aus")
+# Wenden, aber der Lagesensor meldet keine Drehung -> abbrechen und stehen bleiben
+l = Lauf()
+l.schritt(2, einfahrt_verboten=True)
+b = l.schritt(40, gier=0.0)
+ok1 = b['aktion'] == 'stopp' and 'Wenden' in b['grund']
+b = l.schritt(30, gier=0.0)
+ok2 = b['aktion'] == 'stopp'
+l.e.fahrt_aktiv = False
+l.schritt(1)
+l.e.fahrt_aktiv = True
+b = l.schritt(3)
+ok3 = b['aktion'] == 'fahren'
+ok = ok1 and ok2 and ok3
+fehler += not ok
+print(f"{'OK  ' if ok else 'FEHLER'} Wenden ohne gemessene Drehung -> Abbruch, bleibt stehen bis STOPP/START (nicht im Kreis)")
 
 print()
 print('Alle Tests bestanden.' if not fehler else f'{fehler} Test(s) fehlgeschlagen.')

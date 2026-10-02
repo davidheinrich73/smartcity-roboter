@@ -53,7 +53,7 @@ STANDARD = {
     # Zebrastreifen
     'zebra_halt': 0.33,        # Zebrastreifen naeher als das (m, ab Robotermitte) -> anhalten
     'zebra_lidar': 0.5,        # ohne LiDAR-Punkte: etwas naeher als das (breit vorne) -> jemand kommt
-    'zebra_seite': 0.30,       # LiDAR-Punkte bis so weit links/rechts der Fahrlinie gehoeren zum Zebrastreifen
+    'zebra_seite': 0.28,       # LiDAR-Punkte bis so weit links/rechts der Fahrlinie gehoeren zum Zebrastreifen
     'zebra_tiefe': 0.25,       # ... und bis so weit hinter seiner vorderen Kante (m)
     'zebra_schauen': 0.8,      # so lange in jede Richtung schauen (s), nachdem der Arm steht
     'zebra_warten': 2.0,       # jemand da -> so lange warten, dann neu schauen (s)
@@ -61,7 +61,7 @@ STANDARD = {
     # Einbahnstrasse
     'einfahrt_bilder': 2,      # so viele Bilder hintereinander "Einfahrt verboten" -> wenden
     'wenden_dreh': 0.8,        # Drehgeschwindigkeit beim Wenden (rad/s, + = links herum)
-    'wenden_max_zeit': 14.0,
+    'wenden_max_zeit': 7.0,    # laenger -> abbrechen und anhalten (180 Grad dauern bei 0,8 rad/s ca. 4 s)
     # Hindernis aufheben (Posen 'greifen', 'greifen_hoch', 'ablegen' im Panel einlernen!)
     'tiefe_halt': 0.35,        # Tiefenkamera sieht etwas im Weg naeher als das (m) -> stopp
     'aufheben_max_breite': 0.08,
@@ -73,6 +73,8 @@ STANDARD = {
     'anfahr_tempo': 0.03,      # m/s beim letzten Stueck
     # Weg lange versperrt (z. B. zwei Roboter stehen sich gegenueber): nach einer ZUFAELLIGEN Wartezeit
     # weicht einer aus (zurueck + wenden). Zufall, damit nicht beide gleichzeitig ausweichen.
+    'ausweichen': False,       # AUS im Grundbetrieb (Zieldefinition GB-04: bei versperrtem Weg anhalten, nicht
+                               # ausweichen; Gegenverkehr regelt die Infrastruktur). true = nach Wartezeit wenden
     'blockiert_min': 12.0,     # s
     'blockiert_max': 25.0,     # s
     'zurueck_strecke': 0.15,   # so weit zurueck (m), nur wenn hinten frei
@@ -96,6 +98,7 @@ class Entscheider:
         self.einfahrt_n, self.einfahrt_gesperrt_bis = 0, 0.0
         self.aufheben_gesperrt, self.weg_frei_seit = False, None
         self.umschauen_wunsch = None  # Zeit, zu der jemand (Kartograf/Panel) Umschauen gewuenscht hat
+        self.fehler_halt = None       # Manoever fehlgeschlagen -> bleibt stehen bis STOPP + neuer START
         self.blockiert_seit, self.blockiert_grenze = None, 0.0
         self.ereignisse = []          # (zeit, text, art) art: stopp | fahren | info
         self.letzte_bild_nr = -1
@@ -161,6 +164,7 @@ class Entscheider:
         einsatz = szenario == 'einsatz'
         self.jetzt = jetzt
         if not self.fahrt_aktiv:
+            self.fehler_halt = None     # STOPP/TEST quittiert einen Manoever-Fehler
             # STOPP gedrueckt oder nur TEST: nichts am Arm bewegen, laufende Arm-Ablaeufe abbrechen.
             # Der Arm bleibt, wo er ist; beim naechsten START faehrt er zuerst in die Fahrstellung.
             if self.ablauf is not None and self.ablauf.braucht_arm:
@@ -258,6 +262,8 @@ class Entscheider:
             self._arm_abbrechen()
             self.hindernis_bis = jetzt + c['frei_zeit']
             return self._b('stopp', f'NOTBREMSE: LiDAR {d * 100:.0f} cm (ohne KI-Pruefung)')
+        if self.fehler_halt:
+            return self._b('stopp', self.fehler_halt + ' -> bitte pruefen, dann STOPP und START')
         # 2. Blind?
         if d is None and c['lidar_pflicht']:
             return self._b('stopp', 'Kein LiDAR -> fahre nicht blind')
@@ -376,7 +382,7 @@ class Entscheider:
         """Steht er schon lange vor einem Hindernis, weicht er nach zufaelliger Zeit aus."""
         blockiert = (befehl['aktion'] == 'stopp' and self.ablauf is None
                      and befehl['grund'].startswith(self.BLOCKADE_GRUENDE))
-        if not blockiert or not self.fahrt_aktiv:
+        if not blockiert or not self.fahrt_aktiv or not self.c['ausweichen']:
             self.blockiert_seit = None
             return befehl
         if self.blockiert_seit is None:
@@ -411,6 +417,9 @@ class Entscheider:
         elif a.name in ('wenden', 'ausweichen'):
             self.einfahrt_gesperrt_bis = jetzt + 6.0
             self.einfahrt_n = 0
+            if a.ergebnis != 'ok':
+                # NICHT einfach weiterfahren (sonst in die Einbahnstrasse oder ins Hindernis)
+                self.fehler_halt = 'Wenden hat nicht geklappt'
         elif a.name == 'aufheben':
             self.hindernis_bis = 0.0
             if a.ergebnis != 'ok':

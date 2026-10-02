@@ -99,6 +99,7 @@ class Kartograf(Node):
         self.ki = (0.0, {})
         self.gefahren, self.umschauen_bei = 0.0, 0.0
         self.suche_laeuft = False
+        self.fehlversuche = 0
         self.scan_karte = None
         self.geaendert = True
         self.laeuft = True
@@ -212,8 +213,13 @@ class Kartograf(Node):
             with self.lock:
                 self.lok.guete = guete
                 if pose is None or not eindeutig:
-                    self.lok.status = f'suche Position in der Karte ... (beste Uebereinstimmung {guete:.0%})'
+                    self.fehlversuche += 1
+                    self.lok.status = (f'suche Position in der Karte ... (beste Uebereinstimmung {guete:.0%}, '
+                                       f'{self.fehlversuche}. Versuch)')
+                    if self.fehlversuche >= 3:
+                        self.lok.status += ' - andere Umgebung? Panel -> Karte -> Neue Karte'
                     return
+                self.fehlversuche = 0
                 self.lok.pose = K.verknuepfen(pose, K.relativ(odom_scan, self.lok.odom))
                 self.lok.status = f'Position in der Karte gefunden ({guete:.0%})'
                 self.karte.fahrten += 1
@@ -222,7 +228,9 @@ class Kartograf(Node):
                 self.lok.puffer = []
             self.get_logger().info(self.lok.status)
         finally:
-            time.sleep(2.0)          # nicht dauernd suchen
+            # nicht dauernd suchen (kostet viel Rechenzeit, die Linienfolger und KI brauchen):
+            # erst alle 5 s, nach mehreren Fehlversuchen nur noch alle 30 s
+            time.sleep(5.0 if self.fehlversuche < 3 else 30.0)
             self.suche_laeuft = False
 
     # ---------------- Kamera + Tiefe ----------------
@@ -364,6 +372,10 @@ def signale_abfangen():
 
 def main():
     signale_abfangen()
+    try:
+        os.nice(10)   # niedrigere Prioritaet: Linienfolger und KI gehen vor (die Karte darf warten)
+    except OSError:
+        pass
     rclpy.init()
     node = Kartograf()
     executor = MultiThreadedExecutor(num_threads=4)

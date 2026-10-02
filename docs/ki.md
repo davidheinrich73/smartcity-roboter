@@ -37,6 +37,10 @@
 
 Im Szenario **RTW-Einsatz** werden 8 und 9 übergangen (Sonderrechte), alles andere gilt weiter.
 
+**Wenden** (Einbahnstraße) bricht ab und der Roboter bleibt stehen, wenn der Lagesensor nach 2,5 s keine Drehung meldet (IMU fehlt, falsch eingebaut, Räder blockiert) oder nach 7 s nicht fertig ist. Weiter geht es erst nach STOPP und neuem START. So dreht er nicht endlos im Kreis.
+
+**Versperrter Weg:** Er hält an und wartet (Zieldefinition GB-04, Gegenverkehr regelt die Infrastruktur). Automatisches Ausweichen (zurück + wenden nach zufälliger Wartezeit) gibt es weiterhin, ist aber **aus** (`ausweichen: true` schaltet es ein).
+
 **Werte ändern:** Alle Zahlen aus `ki/entscheider.py` (`STANDARD`) sind Einstellungen der KI-Zentrale. Man trägt sie in `config/lokal/roboter.yaml` unter `ki_zentrale:` → `ros__parameters:` ein, z. B. `zebra_halt: 0.30`, und startet die KI neu.
 
 **Fahrschlauch:** Der Linienfolger meldet, wo die Linie vor dem Roboter verläuft. Die KI prüft nur den Streifen von **30 cm Breite** (`fahrschlauch_breite`, Roboterbreite + Rand, **nachmessen**) entlang dieser Linie. Dasselbe gilt für die Tiefenkamera. Früher war es ein gerader Kegel nach vorne. Dann hielt er in jeder Kurve vor Häusern am Rand, und in einer Kurve hielt die Tiefenkamera einen Fußgänger am Straßenrand für ein Hindernis.

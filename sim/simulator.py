@@ -14,6 +14,7 @@ import os
 import re
 import sys
 import time
+from collections import deque
 
 import numpy as np
 import rclpy
@@ -41,6 +42,9 @@ class Simulator(Node):
         self.declare_parameter('wuerfel', True)
         self.declare_parameter('fussgaenger', True)
         self.declare_parameter('gegner', False)   # anderer Roboter steht auf der Linie (blockiert)
+        # Kamerabild kommt so viele Sekunden verspaetet an (wie auf einem ueberlasteten Roboter)
+        self.declare_parameter('kamera_verzoegerung', 0.0)
+        self.verlauf = deque(maxlen=400)          # (Zeit, Pose, Arm) fuer verspaetete Bilder
         self.welt = Welt(self.get_parameter('einbahn').value, self.get_parameter('wuerfel').value,
                          self.get_parameter('fussgaenger').value)
         if self.get_parameter('gegner').value:
@@ -128,6 +132,7 @@ class Simulator(Node):
         y += (self.v * math.sin(w) + self.quer * math.cos(w)) * dt
         w += self.w * dt
         self.pose = [x, y, (w + math.pi) % (2 * math.pi) - math.pi]
+        self.verlauf.append((jetzt, list(self.pose), self.arm[0]))
         self.gefahren += math.hypot(self.v, self.quer) * dt
         # Odometrie mit Fehlern: 3 % zu kurz gemessen, Drehung leicht verfaelscht
         ov, oq, ow = self.v * 0.97, self.quer * 0.97, self.w * 1.02 + 0.004
@@ -177,19 +182,32 @@ class Simulator(Node):
             'arm': self.arm})))
 
     # ---------------- Sensoren ----------------
+    def _frueher(self):
+        """(Zeit, Pose, Arm) vor 'kamera_verzoegerung' Sekunden: so alt ist das Bild, wenn es ankommt."""
+        verz = self.get_parameter('kamera_verzoegerung').value
+        jetzt = time.time()
+        if verz <= 0 or not self.verlauf:
+            return jetzt, self.pose, self.arm[0]
+        for t, pose, arm in reversed(self.verlauf):
+            if t <= jetzt - verz:
+                return t, pose, arm
+        return self.verlauf[0]
+
     def kamera(self):
-        bild, _ = self.welt.kamera(self.pose, self.arm[0] - 90)
+        zeit, pose, arm = self._frueher()
+        bild, _ = self.welt.kamera(pose, arm - 90)
         msg = self.bridge.cv2_to_imgmsg(bild, 'bgr8')
-        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.stamp.sec, msg.header.stamp.nanosec = int(zeit), int((zeit % 1) * 1e9)  # Aufnahmezeit
         msg.header.frame_id = 'camera_color'
         self.pub_bild.publish(msg)
         self.pub_info_c.publish(CameraInfo(header=msg.header, width=bild.shape[1], height=bild.shape[0]))
 
     def tiefe(self):
-        _, d = self.welt.kamera(self.pose, self.arm[0] - 90, schritt=2)
+        zeit, pose, arm = self._frueher()
+        _, d = self.welt.kamera(pose, arm - 90, schritt=2)
         d = d + self.rng.normal(0, 0.003, d.shape) * (d > 0)
         msg = self.bridge.cv2_to_imgmsg((d * 1000).astype(np.uint16), '16UC1')
-        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.stamp.sec, msg.header.stamp.nanosec = int(zeit), int((zeit % 1) * 1e9)
         msg.header.frame_id = 'camera_depth'
         self.pub_tiefe.publish(msg)
         self.pub_info_d.publish(CameraInfo(header=msg.header, width=d.shape[1], height=d.shape[0]))
