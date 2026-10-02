@@ -17,3 +17,13 @@ Welcher Roboter ist es? Alle heißen `yahboom`. `scripts/installieren.sh` fragt 
 | RM02 | ? | ? |
 | RM03 | ? | ? |
 | RM04 | ? | ? |
+
+## Mehrere Roboter gleichzeitig
+
+Alle Roboter nutzen ab Werk ROS-Domain-ID 30. Dann hört jeder Roboter die Fahrbefehle der anderen mit. **Deshalb nie zwei Roboter mit derselben Domain-ID gleichzeitig einschalten.**
+
+Für gleichzeitiges Fahren braucht jeder Roboter eine eigene Nummer (z. B. RM01 = 31, RM02 = 32 ...):
+1. Unsere Programme: `echo 32 > ~/ros_domain_id` (wird von `scripts/env.sh` gelesen).
+2. Yahboom-Teil (micro-ROS-Agent, Autostart) muss **dieselbe** Nummer bekommen. Das ist eine Änderung an Yahboom-/Systemeinstellungen: nur nach Absprache mit der Lehrkraft, vorher sichern.
+
+Im Verkehr erkennen sich die Roboter gegenseitig als Hindernis (LiDAR). Stehen zwei voreinander, wartet jeder eine zufällige Zeit (12–25 s), dann fährt einer etwas zurück und wendet. So blockieren sie sich nicht dauerhaft.

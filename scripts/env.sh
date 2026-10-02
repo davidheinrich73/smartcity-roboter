@@ -6,7 +6,14 @@ for ws in "$HOME/yahboomcar_ws" "$HOME/M3Pro_ws" "$HOME/mircoROS_agent"; do
         source "$ws/install/setup.bash"
     fi
 done
-export ROS_DOMAIN_ID="${ROS_DOMAIN_ID_OVERRIDE:-30}"
+# Domain-ID: Programme mit derselben Nummer hoeren sich gegenseitig. Alle Roboter haben ab Werk 30.
+# Fahren mehrere Roboter gleichzeitig, braucht jeder eine eigene Nummer: in ~/ros_domain_id eintragen
+# (z. B. "31"). ACHTUNG: Der Yahboom-Teil (micro-ROS-Agent im Autostart) muss dieselbe Nummer haben,
+# sonst sehen unsere Programme den Roboter nicht mehr (siehe docs/roboter.md). Ohne Datei: 30.
+DOMAIN_DATEI="$HOME/ros_domain_id"
+DOMAIN_STANDARD=30
+[ -f "$DOMAIN_DATEI" ] && DOMAIN_STANDARD="$(tr -dc '0-9' < "$DOMAIN_DATEI")"
+export ROS_DOMAIN_ID="${ROS_DOMAIN_ID_OVERRIDE:-${DOMAIN_STANDARD:-30}}"
 
 # Groesserer Shared-Memory-Bereich fuer Fast DDS, damit Kamerabilder (~900 KB) fluessig
 # ankommen (in der Simulation: 15 statt 1 Bild pro Sekunde). Gilt nur fuer Programme,

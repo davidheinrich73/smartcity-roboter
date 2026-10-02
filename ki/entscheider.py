@@ -27,7 +27,9 @@
 # Im Szenario "einsatz" (RTW) werden 7 und 8 uebergangen, alles andere gilt weiter.
 # Mehrschrittige Ablaeufe (Zebrastreifen, Wenden, Aufheben) stehen in ki/ablaeufe.py.
 
-from ablaeufe import Zebrastreifen, Wenden, Aufheben, Umschauen, LEBEWESEN
+import random
+
+from ablaeufe import Zebrastreifen, Wenden, Aufheben, Umschauen, Ausweichen, LEBEWESEN
 
 FAHRZEUGE = {'Auto', 'Bus', 'LKW', 'Motorrad', 'Fahrrad', 'Zug'}
 
@@ -69,6 +71,13 @@ STANDARD = {
     'ausricht_abstand': 0.30,  # so weit vor dem Gegenstand seitlich ausrichten (Kamera sieht ihn noch)
     'greif_abstand': 0.20,     # Robotermitte bis Mitte Gegenstand in der Pose 'greifen' (am Roboter messen!)
     'anfahr_tempo': 0.03,      # m/s beim letzten Stueck
+    # Weg lange versperrt (z. B. zwei Roboter stehen sich gegenueber): nach einer ZUFAELLIGEN Wartezeit
+    # weicht einer aus (zurueck + wenden). Zufall, damit nicht beide gleichzeitig ausweichen.
+    'blockiert_min': 12.0,     # s
+    'blockiert_max': 25.0,     # s
+    'zurueck_strecke': 0.15,   # so weit zurueck (m), nur wenn hinten frei
+    'zurueck_tempo': 0.05,     # m/s
+    'hinten_frei': 0.25,       # LiDAR hinten mindestens so weit frei (m), sonst nicht zurueck
 }
 
 GREIF_POSEN = ('fahrstellung', 'greifen', 'greifen_hoch', 'ablegen')
@@ -87,6 +96,7 @@ class Entscheider:
         self.einfahrt_n, self.einfahrt_gesperrt_bis = 0, 0.0
         self.aufheben_gesperrt, self.weg_frei_seit = False, None
         self.umschauen_wunsch = None  # Zeit, zu der jemand (Kartograf/Panel) Umschauen gewuenscht hat
+        self.blockiert_seit, self.blockiert_grenze = None, 0.0
         self.ereignisse = []          # (zeit, text, art) art: stopp | fahren | info
         self.letzte_bild_nr = -1
         # Ampel
@@ -178,6 +188,7 @@ class Entscheider:
         w = dict(w, neues_bild=neues_bild)
 
         befehl = self._entscheide(jetzt, w, einsatz)
+        befehl = self._blockade(jetzt, w, befehl)
         # Arm zuerst zurueck in Fahrstellung, bevor wieder gefahren wird
         # (nicht waehrend einer Notbremse: dann ist etwas sehr nah am Roboter)
         if self.arm_zurueck_noetig and self.fahrt_aktiv and not befehl['grund'].startswith('NOTBREMSE'):
@@ -359,6 +370,26 @@ class Entscheider:
             return self._b('stopp', f'Stoppschild -> halte noch {self.schild_bis - jetzt:.0f} s')
         return self._b('fahren', 'EINSATZFAHRT, Weg frei' if einsatz else 'Weg frei', fahrfaktor)
 
+    BLOCKADE_GRUENDE = ('NOTBREMSE', 'Hindernis', 'LiDAR: etwas', 'KI sieht im Weg')
+
+    def _blockade(self, jetzt, w, befehl):
+        """Steht er schon lange vor einem Hindernis, weicht er nach zufaelliger Zeit aus."""
+        blockiert = (befehl['aktion'] == 'stopp' and self.ablauf is None
+                     and befehl['grund'].startswith(self.BLOCKADE_GRUENDE))
+        if not blockiert or not self.fahrt_aktiv:
+            self.blockiert_seit = None
+            return befehl
+        if self.blockiert_seit is None:
+            self.blockiert_seit = jetzt
+            self.blockiert_grenze = random.uniform(self.c['blockiert_min'], self.c['blockiert_max'])
+        if jetzt - self.blockiert_seit < self.blockiert_grenze:
+            return befehl
+        self.blockiert_seit = None
+        self._ereignis(jetzt, f'Weg seit {self.blockiert_grenze:.0f} s versperrt (vielleicht ein anderer Roboter) '
+                              '-> weiche aus', 'stopp')
+        self.hindernis_bis = 0.0
+        return self._ablauf_start(jetzt, Ausweichen(jetzt, self.c, w.get('gier', 0.0)))
+
     # ------------------------------------------------------------------ #
     # Ablaeufe
     def _ablauf_start(self, jetzt, ablauf):
@@ -377,7 +408,7 @@ class Entscheider:
         if a.name == 'zebra':
             self.zebra_gesperrt = True
             self.zebra_zuletzt = jetzt   # beim Umschauen sah die Kamera den Zebrastreifen nicht
-        elif a.name == 'wenden':
+        elif a.name in ('wenden', 'ausweichen'):
             self.einfahrt_gesperrt_bis = jetzt + 6.0
             self.einfahrt_n = 0
         elif a.name == 'aufheben':

@@ -40,8 +40,12 @@ class Simulator(Node):
         self.declare_parameter('einbahn', True)
         self.declare_parameter('wuerfel', True)
         self.declare_parameter('fussgaenger', True)
+        self.declare_parameter('gegner', False)   # anderer Roboter steht auf der Linie (blockiert)
         self.welt = Welt(self.get_parameter('einbahn').value, self.get_parameter('wuerfel').value,
                          self.get_parameter('fussgaenger').value)
+        if self.get_parameter('gegner').value:
+            x, y, _ = self.welt.pose_bei(1.75)
+            self.welt.zylinder.append({'x': x, 'y': y, 'r': 0.12, 'h': 0.2, 'farbe': (90, 90, 90), 'name': 'gegner'})
         self.bridge = CvBridge()
         self.rng = np.random.default_rng(7)
         x, y, w = self.welt.pose_bei(0.0)
