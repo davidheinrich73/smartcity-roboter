@@ -8,11 +8,13 @@ class _Pub:
 class _Wert:
     def __init__(self, v): self.value = v
 class Node:
-    def __init__(self, name, **k): self.subs = {}; self.pubs = {}; self._p = {}
+    def __init__(self, name, **k): self.subs = {}; self.pubs = {}; self._p = {}; self._cbs = []
     def declare_parameter(self, n, v): self._p[n] = v
     def get_parameter(self, n): return _Wert(self._p[n])
     def set_parameters(self, liste):
+        for cb in self._cbs: cb(liste)
         for p in liste: self._p[p.name] = p.value
+    def add_on_set_parameters_callback(self, cb): self._cbs.append(cb)
     def create_publisher(self, typ, topic, q, **k): self.pubs[topic] = _Pub(topic); return self.pubs[topic]
     def create_subscription(self, typ, topic, cb, q, **k): self.subs[topic] = cb; return cb
     def destroy_subscription(self, s): pass

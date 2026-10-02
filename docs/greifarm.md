@@ -37,11 +37,32 @@ Quelle: ein öffentlicher Treiber für den M3 Pro ([strands-labs/robots, Pull Re
 - 6 Schieberegler, "Pose anfahren", Greifer auf/zu, Dauer der Bewegung.
 - Gesperrt, solange das Fahrprogramm läuft (die Kamera sitzt am Arm).
 - Werte außerhalb der Bereiche werden abgelehnt, nicht gekürzt.
-- Posen speichern (`config/arm.yaml`):
-  - **fahrstellung**: so steht der Arm beim Linienfolgen. **Als Erstes speichern!** Die Stellung, in der der Linienfolger auf RM02 funktioniert hat, ist nicht bekannt. Vorsichtig herantasten (kleine Schritte, Dauer 2–3 s).
-  - **pruefblick**: Kamera schaut z. B. etwas weiter nach vorne/unten, um Hindernisse zu prüfen.
-- Schalter "KI darf den Arm bewegen". Die KI schaut dann bei einer unklaren LiDAR-Meldung **im Stand** kurz in den Prüfblick und fährt danach zurück in die Fahrstellung, erst dann geht es weiter. In der Simulation getestet, mit dem echten Arm nicht.
+- **Posen einlernen**: Regler einstellen, mit "Pose anfahren" prüfen, dann den passenden Knopf drücken. Gespeichert wird in `config/lokal/arm.yaml`. Die Datei ist nicht im Repository, bleibt also bei Updates erhalten. Standardwerte stehen in `config/arm.yaml`. Danach die KI neu starten (System).
 
-## Idee "Gegenstand aufsammeln" (noch nicht gebaut)
+| Pose | Wofür | Hinweis |
+|---|---|---|
+| **fahrstellung** | Linienfolgen. **Als Erstes!** | Startstellung der Gamepad-Steuerung ist voreingestellt. Kameramaße danach nachmessen (`docs/linie.md`) |
+| pruefblick | KI schaut bei unklarer LiDAR-Meldung genauer hin | ohne diese Pose schaut die KI nicht genauer hin |
+| blick_links / blick_rechts | Zebrastreifen und Karte: umschauen | ohne eigene Pose: Fahrstellung mit Servo 1 um ±45° gedreht. **Richtung ungeprüft**: zeigt "links" nach rechts, beide neu einlernen |
+| greifen | Arm unten vor dem Roboter, Greifer offen um den Gegenstand | Gegenstand mittig, Abstand zur Robotermitte messen → `greif_abstand` (Standard 20 cm) |
+| greifen_hoch | Gegenstand angehoben | |
+| ablegen | seitlich neben der Straße, dort wird losgelassen | weit genug weg, damit er nicht wieder im Weg liegt |
 
-LiDAR/KI hält vor dem Gegenstand → Tiefenkamera misst Abstand und Lage → Arm fährt hin, Greifer zu → Arm hoch → Fahrstellung → weiter. Dafür braucht man eine Umrechnung "Punkt im Kamerabild → Servowinkel" (inverse Kinematik). Yahboom hat dafür vermutlich Beispiele ("3D grasping", siehe `arm_suchen.sh`, Abschnitt Launch-Dateien). Sinnvoll erst, wenn Fahrstellung und Prüfblick sicher funktionieren.
+- Schalter **"KI darf den Arm bewegen"**. Was die KI dann tut, hängt davon ab, welche Posen da sind:
+  - Prüfblick: genauer hinschauen,
+  - Blick links/rechts: am Zebrastreifen und für die Karte umschauen,
+  - Greifen, Greifen hoch, Ablegen: aufheben.
+
+  Immer nur **im Stand** und nur, solange das Fahrprogramm **fährt** (nicht im TEST, nicht nach STOPP).
+
+## Aufheben (KI, ki/ablaeufe.py)
+
+1. Tiefenkamera (oder LiDAR + Tiefenkamera) meldet etwas Kleines **mitten auf der Fahrbahn**.
+2. Seitlich ausrichten, bis es mittig 30 cm vor dem Roboter liegt (Mecanum-Räder fahren seitwärts, max. 4 cm/s).
+3. Langsam heranfahren (3 cm/s), bis es zwischen den Greiferbacken liegt (`greif_abstand`).
+4. Greifer auf → zu → Arm hoch → zur Seite (ablegen) → loslassen → Fahrstellung.
+5. Prüfen: Liegt es noch da, nicht nochmal versuchen, sondern warten.
+
+**Nie aufgehoben wird:** Lebewesen und Fahrzeuge. Ebenso alles, was breiter als 8 cm, höher als 12 cm oder mehr als 8 cm neben der Linie liegt, und alles in den ersten 3 s nach einem Zebrastreifen (dort stehen Fußgänger). Dann wartet der Roboter.
+
+In der Simulation klappt das mit dem Holzwürfel. Mit dem echten Arm ist es **ungetestet**. Vor dem ersten echten Versuch die Posen einzeln im Panel anfahren und prüfen, ob der Greifer den Würfel wirklich umschließt. Würfel dazu von Hand an die Greifstelle legen. Den ersten echten Versuch mit kleinem Tempo machen, eine Hand am STOPP.

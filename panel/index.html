@@ -8,147 +8,166 @@
   :root {
     --bg: #0b1220; --karte: #131c2e; --karte2: #19243a; --rand: #24324d; --text: #e6edf7; --grau: #8da2c0;
     --gruen: #22c55e; --gelb: #f5b301; --rot: #ef4444; --blau: #3b82f6; --lila: #a78bfa; --tuerkis: #22d3ee;
+    --kopf-h: 60px;
   }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
   html, body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, "Segoe UI", Roboto, sans-serif; }
-  button { font: inherit; color: inherit; border: 0; border-radius: 12px; background: var(--karte2); padding: 12px 16px; cursor: pointer; }
-  button:active { transform: scale(0.97); }
+  button, .knopf { font: inherit; color: inherit; border: 0; border-radius: 10px; background: var(--karte2); padding: 10px 14px;
+                   cursor: pointer; text-decoration: none; display: inline-block; }
+  button:active, .knopf:active { transform: scale(0.97); }
   button:disabled { opacity: 0.4; cursor: not-allowed; }
-  h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .08em; color: var(--grau); margin: 0 0 12px; font-weight: 600; }
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .08em; color: var(--grau); margin: 0 0 10px; font-weight: 600; }
 
-  /* Kopfzeile */
-  .kopf { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-          padding: 10px 16px; background: rgba(11,18,32,.95); border-bottom: 1px solid var(--rand); }
-  .marke { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 20px; }
-  .marke small { color: var(--grau); font-weight: 500; font-size: 15px; }
-  .seiten { display: flex; gap: 6px; flex-wrap: wrap; }
-  .seiten button { padding: 10px 16px; background: transparent; color: var(--grau); font-weight: 600; }
+  /* ---------- Kopfzeile ---------- */
+  .kopf { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+          padding: 8px 12px; background: rgba(11,18,32,.96); border-bottom: 1px solid var(--rand); }
+  .marke { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 19px; }
+  .marke small { color: var(--grau); font-weight: 500; font-size: 14px; }
+  .seiten { display: flex; gap: 4px; flex-wrap: wrap; }
+  .seiten button { padding: 9px 13px; background: transparent; color: var(--grau); font-weight: 600; }
   .seiten button.aktiv { background: var(--karte2); color: var(--text); }
-  .kopf-rechts { margin-left: auto; display: flex; gap: 10px; align-items: center; }
-  .pille { white-space: nowrap; display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 999px; background: var(--karte2); font-weight: 600; font-size: 15px; }
-  #nothalt { background: var(--rot); font-weight: 800; font-size: 22px; padding: 12px 34px; letter-spacing: .05em; box-shadow: 0 0 0 3px #ef444455; }
-  @media (max-width: 1150px) {
-    .seiten button { padding: 8px 10px; }
-    .pille { padding: 6px 10px; font-size: 14px; }
-    #nothalt { padding: 10px 22px; font-size: 20px; }
-    .marke { font-size: 18px; }
+  .kopf-rechts { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  .pille { white-space: nowrap; display: flex; align-items: center; gap: 8px; padding: 7px 11px; border-radius: 999px;
+           background: var(--karte2); font-weight: 600; font-size: 14px; }
+  #nothalt { background: var(--rot); font-weight: 800; font-size: 21px; padding: 10px 30px; letter-spacing: .05em; box-shadow: 0 0 0 3px #ef444455; }
+  @media (max-width: 1180px) {
+    #p-netz { display: none; }
+    .kopf { gap: 6px; padding: 6px 8px; }
+    .seiten { gap: 2px; }
+    .seiten button { padding: 7px 8px; font-size: 14px; }
+    .marke { font-size: 0; gap: 4px; } .marke small { font-size: 13px; }
+    .pille { padding: 6px 9px; font-size: 13px; gap: 6px; }
+    #nothalt { padding: 8px 18px; font-size: 18px; }
   }
   @media (max-width: 640px) {
-    .kopf { padding: 8px 10px; gap: 8px; }
-    .kopf-rechts { margin-left: 0; width: 100%; flex-wrap: wrap; }
-    .kopf-rechts .pille { font-size: 13px; padding: 6px 10px; }
-    #nothalt { flex: 1 1 100%; }
-    main { padding: 10px; }
-    .karte { padding: 12px; }
-    .gedanke .aktion { font-size: 26px; } .gedanke .grund { font-size: 17px; }
+    .kopf-rechts { margin-left: 0; width: 100%; }
+    #nothalt { flex: 1; }
   }
-  #akkuwarnung { background: var(--rot); text-align: center; font-weight: 800; padding: 10px; font-size: 20px; }
+  #akkuwarnung { background: var(--rot); text-align: center; font-weight: 800; padding: 8px; font-size: 19px; }
 
-  main { padding: 16px; max-width: 1500px; margin: 0 auto; }
-  .karte { background: var(--karte); border: 1px solid var(--rand); border-radius: 16px; padding: 16px; margin-bottom: 16px; }
-  .raster { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(320px, 1fr); gap: 16px; align-items: start; }
-  @media (max-width: 1000px) { .raster { grid-template-columns: 1fr; } }
+  main { padding: 10px; }
+  .karte { background: var(--karte); border: 1px solid var(--rand); border-radius: 14px; padding: 14px; margin-bottom: 12px; }
+  .hinweis { color: var(--grau); font-size: 14px; line-height: 1.45; margin: 8px 2px 0; }
+  .zeile { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
+
+  /* ---------- Dashboard: alles auf einen Blick ---------- */
+  .dash { display: grid; gap: 10px; height: calc(100vh - var(--kopf-h) - 20px); min-height: 520px;
+          grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(270px, 0.85fr);
+          grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr);
+          grid-template-areas: "gedanke gedanke steuer" "karte kamera steuer" "karte lidar log"; }
+  .f-gedanke { grid-area: gedanke; } .f-karte { grid-area: karte; } .f-kamera { grid-area: kamera; }
+  .f-lidar { grid-area: lidar; } .f-steuer { grid-area: steuer; } .f-log { grid-area: log; }
+  .feld { min-height: 0; min-width: 0; }
+  @media (max-width: 1000px) {
+    .dash { display: flex; flex-direction: column; height: auto; }
+    .f-karte { height: 62vh; } .f-kamera { height: 46vh; } .f-lidar { height: 46vh; }
+    .f-steuer { order: -1; } .f-gedanke { order: -2; }
+  }
+
+  /* Widget = Kasten mit Kopfzeile und Anzeige (Karte, Kamera, LiDAR) */
+  .widget { display: flex; flex-direction: column; height: 100%; background: var(--karte); border: 1px solid var(--rand);
+            border-radius: 14px; overflow: hidden; }
+  .widget .kz { display: flex; align-items: center; gap: 6px; padding: 6px 8px 6px 12px; flex-wrap: wrap; }
+  .widget .kz b { font-size: 14px; text-transform: uppercase; letter-spacing: .07em; color: var(--grau); margin-right: auto; }
+  .widget .kz button { padding: 5px 10px; font-size: 14px; border-radius: 8px; }
+  .widget .kz button.aktiv { background: var(--blau); }
+  .flaeche { position: relative; flex: 1; min-height: 0; background: #05080f; overflow: hidden; touch-action: none; }
+  .flaeche img, .flaeche canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
+  .flaeche .info { position: absolute; left: 8px; bottom: 6px; font-size: 13px; color: #cbd5e1; background: #05080fcc;
+                   padding: 3px 8px; border-radius: 8px; pointer-events: none; max-width: calc(100% - 16px); }
+  .gross { height: calc(100vh - var(--kopf-h) - 40px); min-height: 360px; margin-bottom: 12px; }
+  .gross-mit-leiste { height: calc(100vh - var(--kopf-h) - 200px); min-height: 340px; margin-bottom: 12px; }
 
   /* Gedanke = Entscheidung der KI */
-  .gedanke { display: flex; align-items: center; gap: 18px; border-width: 2px; }
-  .gedanke .kreis { flex: none; width: 74px; height: 74px; border-radius: 50%; display: grid; place-items: center; background: #33415555; }
-  .gedanke .kreis svg { width: 42px; height: 42px; }
-  .gedanke .aktion { font-size: 34px; font-weight: 800; letter-spacing: .03em; line-height: 1.1; }
-  .gedanke .grund { font-size: 20px; margin-top: 4px; }
-  .gedanke .meta { color: var(--grau); font-size: 14px; margin-top: 6px; }
+  .gedanke { display: flex; align-items: center; gap: 14px; background: var(--karte); border: 2px solid var(--rand);
+             border-radius: 14px; padding: 10px 14px; }
+  .gedanke .kreis { flex: none; width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; background: #33415555; }
+  .gedanke .kreis svg { width: 30px; height: 30px; }
+  .gedanke .aktion { font-size: 26px; font-weight: 800; letter-spacing: .03em; line-height: 1.1; }
+  .gedanke .grund { font-size: 17px; margin-top: 2px; }
+  .gedanke .meta { color: var(--grau); font-size: 13px; margin-top: 3px; }
   .gedanke.fahren { border-color: var(--gruen); } .gedanke.fahren .kreis { background: #22c55e33; color: var(--gruen); } .gedanke.fahren .aktion { color: var(--gruen); }
   .gedanke.langsam { border-color: var(--gelb); } .gedanke.langsam .kreis { background: #f5b30133; color: var(--gelb); } .gedanke.langsam .aktion { color: var(--gelb); }
   .gedanke.stopp { border-color: var(--rot); } .gedanke.stopp .kreis { background: #ef444433; color: var(--rot); } .gedanke.stopp .aktion { color: var(--rot); }
+  .gedanke.manoever { border-color: var(--lila); } .gedanke.manoever .kreis { background: #a78bfa33; color: var(--lila); } .gedanke.manoever .aktion { color: var(--lila); }
 
-  /* Live-Ansicht */
-  .reiter { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
-  .reiter button { flex: 1 1 120px; font-weight: 600; }
-  .reiter button.aktiv { background: var(--blau); }
-  .bildflaeche { position: relative; background: #000; border-radius: 12px; overflow: hidden; aspect-ratio: 4 / 3; max-height: 62vh; width: 100%; display: grid; place-items: center; }
-  .bildflaeche img, .bildflaeche canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
-  .hinweis { color: var(--grau); font-size: 14px; line-height: 1.45; margin: 10px 2px 0; }
-  .lidar-regler { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+  /* Steuerung */
+  .steuer { height: 100%; overflow: auto; background: var(--karte); border: 1px solid var(--rand); border-radius: 14px; padding: 12px; }
+  .knoepfe { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+  .knoepfe button { font-size: 19px; font-weight: 800; padding: 16px 6px; }
+  .k-start { background: var(--gruen); color: #04220f; } .k-test { background: var(--gelb); color: #2a1d00; } .k-stopp { background: var(--rot); }
+  .segmente { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; }
+  .segmente button { text-align: left; padding: 8px 10px; border: 2px solid transparent; }
+  .segmente button b { display: block; font-size: 15px; }
+  .segmente button small { display: block; color: var(--grau); font-size: 12px; margin-top: 2px; line-height: 1.25; }
+  .segmente button.aktiv { border-color: var(--blau); background: #1d3159; }
+  @media (max-width: 1180px) { .segmente button small { display: none; } }
+  .tempo { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+  .tempo input { flex: 1; accent-color: var(--blau); height: 26px; }
+  .tempo b { min-width: 80px; text-align: right; font-variant-numeric: tabular-nums; }
+  #antwort { color: var(--grau); font-size: 13px; min-height: 1.3em; margin-top: 8px; white-space: pre-wrap; }
+  .chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
+  .chip { padding: 4px 9px; border-radius: 999px; background: #0b1220; font-size: 13px; border: 1px solid var(--rand); white-space: nowrap; }
+  .chip.rot { background: #ef444430; border-color: var(--rot); } .chip.gelb { background: #f5b30126; border-color: var(--gelb); }
+  .chip.gruen { border-color: #22c55e80; } .chip.lila { background: #a78bfa26; border-color: var(--lila); }
+  .chip.aus { color: var(--grau); }
+
+  /* Ereignisse */
+  .log { height: 100%; display: flex; flex-direction: column; background: var(--karte); border: 1px solid var(--rand); border-radius: 14px; padding: 10px 12px; }
+  .ereignisse { list-style: none; margin: 0; padding: 0; overflow: auto; flex: 1; min-height: 0; }
+  .ereignisse li { display: flex; gap: 8px; padding: 6px 2px; border-bottom: 1px solid var(--rand); font-size: 14px; }
+  .ereignisse time { color: var(--grau); font-variant-numeric: tabular-nums; flex: none; }
+  .ereignisse .punkt { flex: none; width: 9px; height: 9px; border-radius: 50%; margin-top: 5px; background: var(--blau); }
+  .ereignisse .stopp .punkt { background: var(--rot); } .ereignisse .langsam .punkt { background: var(--gelb); } .ereignisse .fahren .punkt { background: var(--gruen); }
+  @media (max-width: 1000px) { .log { max-height: 360px; } }
+
+  /* Karte: Legende */
+  .legende { display: flex; flex-wrap: wrap; gap: 12px; font-size: 14px; color: var(--grau); }
+  .legende i { display: inline-block; width: 14px; height: 14px; border-radius: 4px; vertical-align: -2px; margin-right: 5px; }
+
+  /* LiDAR-Regler */
+  .lidar-regler { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .lidar-regler .gruppe { display: flex; gap: 6px; align-items: center; background: var(--karte2); border-radius: 12px; padding: 4px 4px 4px 12px; }
   .lidar-regler .gruppe button { background: #2a3a5a; padding: 8px 12px; }
 
-  /* Steuerung */
-  .segmente { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
-  .segmente button { text-align: left; padding: 12px; border: 2px solid transparent; }
-  .segmente button b { display: block; font-size: 17px; }
-  .segmente button small { display: block; color: var(--grau); font-size: 13px; margin-top: 4px; line-height: 1.3; }
-  .segmente button.aktiv { border-color: var(--blau); background: #1d3159; }
-  .tempo { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
-  .tempo input { flex: 1; accent-color: var(--blau); height: 28px; }
-  .tempo b { min-width: 92px; text-align: right; font-variant-numeric: tabular-nums; }
-  .knoepfe { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
-  .knoepfe button { font-size: 20px; font-weight: 800; padding: 20px 8px; }
-  .k-start { background: var(--gruen); color: #04220f; } .k-test { background: var(--gelb); color: #2a1d00; } .k-stopp { background: var(--rot); }
-  #antwort { color: var(--grau); font-size: 14px; min-height: 1.4em; margin-top: 10px; white-space: pre-wrap; }
-
-  /* Sinne */
-  .sinne { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .sinn { background: var(--karte2); border-radius: 12px; padding: 12px; border: 2px solid transparent; min-height: 92px; }
-  .sinn .titel { color: var(--grau); font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
-  .sinn .wert { font-size: 20px; font-weight: 700; margin-top: 6px; }
-  .sinn .klein { color: var(--grau); font-size: 13px; margin-top: 4px; }
-  .sinn.alarm { border-color: var(--rot); } .sinn.achtung { border-color: var(--gelb); } .sinn.gut { border-color: #22c55e66; }
-  .sinn.breit { grid-column: 1 / -1; }
-  .ampel { display: inline-flex; gap: 6px; padding: 6px 8px; background: #05080f; border-radius: 10px; margin-top: 6px; }
-  .ampel i { width: 22px; height: 22px; border-radius: 50%; background: #222a38; display: block; }
-  .ampel i.an.g { background: var(--gruen); box-shadow: 0 0 12px var(--gruen); }
-  .ampel i.an.y { background: var(--gelb); box-shadow: 0 0 12px var(--gelb); }
-  .ampel i.an.r { background: var(--rot); box-shadow: 0 0 12px var(--rot); }
-  .balken { height: 10px; background: #0b1220; border-radius: 6px; overflow: hidden; margin-top: 8px; }
-  .balken div { height: 100%; width: 0; background: var(--tuerkis); transition: width .2s; }
-  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-  .chip { padding: 4px 10px; border-radius: 999px; background: #0b1220; font-size: 14px; }
-  .chip.weg { background: var(--rot); font-weight: 700; }
-
-  /* Ereignisse */
-  .ereignisse { list-style: none; margin: 0; padding: 0; max-height: 300px; overflow: auto; }
-  .ereignisse li { display: flex; gap: 10px; padding: 8px 4px; border-bottom: 1px solid var(--rand); font-size: 15px; }
-  .ereignisse time { color: var(--grau); font-variant-numeric: tabular-nums; flex: none; }
-  .ereignisse .punkt { flex: none; width: 10px; height: 10px; border-radius: 50%; margin-top: 6px; background: var(--blau); }
-  .ereignisse .stopp .punkt { background: var(--rot); } .ereignisse .langsam .punkt { background: var(--gelb); } .ereignisse .fahren .punkt { background: var(--gruen); }
-
   /* Arm */
-  .servo { display: grid; grid-template-columns: 230px 1fr 64px; gap: 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--rand); }
+  .servo { display: grid; grid-template-columns: 230px 1fr 64px; gap: 12px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--rand); }
   .servo input { width: 100%; accent-color: var(--lila); height: 28px; }
   .servo b { text-align: right; font-variant-numeric: tabular-nums; }
-  @media (max-width: 1150px) {
-    .seiten button { padding: 8px 10px; }
-    .pille { padding: 6px 10px; font-size: 14px; }
-    #nothalt { padding: 10px 22px; font-size: 20px; }
-    .marke { font-size: 18px; }
-  }
   @media (max-width: 640px) { .servo { grid-template-columns: 1fr 56px; } .servo input { grid-column: 1 / -1; } }
-  .zeile { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center; }
   .warnkasten { background: #f5b30122; border: 1px solid var(--gelb); border-radius: 12px; padding: 12px; margin-bottom: 12px; line-height: 1.45; }
   pre { white-space: pre-wrap; background: #05080f; padding: 12px; border-radius: 10px; font-size: 13px; }
+  .lernen { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; margin-top: 10px; }
+  .lernen button { text-align: left; padding: 10px 12px; border: 2px solid transparent; }
+  .lernen button b { display: block; } .lernen button small { display: block; color: var(--grau); font-size: 12px; margin-top: 3px; line-height: 1.3; }
+  .lernen button.da { border-color: #22c55e80; } .lernen button.fehlt { border-color: #f5b30180; }
+  .raster2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; } @media (max-width: 1000px) { .raster2 { grid-template-columns: 1fr; } }
 
-  /* Sensoren */
+  /* Sensoren / System */
   table { width: 100%; border-collapse: collapse; }
-  td { padding: 12px 8px; border-bottom: 1px solid var(--rand); }
+  td { padding: 10px 8px; border-bottom: 1px solid var(--rand); }
   td.ok { color: var(--gruen); font-weight: 700; } td.schlecht { color: var(--rot); font-weight: 700; }
-  .akkugross { font-size: 30px; font-weight: 800; }
-  .akkubalken { height: 26px; background: #0b1220; border-radius: 8px; overflow: hidden; margin-top: 10px; }
+  .akkugross { font-size: 28px; font-weight: 800; }
+  .akkubalken { height: 24px; background: #0b1220; border-radius: 8px; overflow: hidden; margin-top: 10px; }
   .akkubalken div { height: 100%; width: 0; }
-
-  /* System */
-  .adresse { font-size: 26px; font-weight: 800; font-family: ui-monospace, monospace; background: #05080f; padding: 12px 16px; border-radius: 12px; display: inline-block; margin: 6px 0; user-select: all; }
-  .schalter { display: flex; align-items: center; gap: 12px; font-size: 18px; }
-  .schalter input { width: 28px; height: 28px; accent-color: var(--blau); }
+  .adresse { font-size: 24px; font-weight: 800; font-family: ui-monospace, monospace; background: #05080f; padding: 10px 14px; border-radius: 12px; display: inline-block; margin: 6px 0; user-select: all; }
+  .schalter { display: flex; align-items: center; gap: 12px; font-size: 17px; flex-wrap: nowrap !important; }
+  .schalter label { flex: 1; line-height: 1.4; }
+  .schalter input { width: 26px; height: 26px; accent-color: var(--blau); flex: none; }
 </style>
 </head>
 <body>
-<header class="kopf">
+<header class="kopf" id="kopf">
   <div class="marke">
-    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="8" width="16" height="10" rx="3"/><circle cx="9" cy="13" r="1.5"/><circle cx="15" cy="13" r="1.5"/><path d="M12 4v4M7 18v2M17 18v2"/></svg>
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="8" width="16" height="10" rx="3"/><circle cx="9" cy="13" r="1.5"/><circle cx="15" cy="13" r="1.5"/><path d="M12 4v4M7 18v2M17 18v2"/></svg>
     SmartCity <small id="roboter"></small>
   </div>
   <nav class="seiten">
-    <button data-seite="cockpit" class="aktiv">Cockpit</button>
+    <button data-seite="dashboard" class="aktiv">Dashboard</button>
+    <button data-seite="karte">Karte</button>
+    <button data-seite="kamera">Kamera</button>
+    <button data-seite="lidar">LiDAR</button>
     <button data-seite="arm">Arm</button>
     <button data-seite="sensoren">Sensoren</button>
     <button data-seite="system">System</button>
@@ -165,73 +184,124 @@
 <div id="akkuwarnung" hidden>AKKU SCHWACH - Roboter laden!</div>
 
 <main>
-<!-- ============ COCKPIT ============ -->
-<section id="s-cockpit">
-  <div class="raster">
-    <div>
-      <div class="karte gedanke stopp" id="gedanke">
-        <div class="kreis" id="g-icon"></div>
-        <div>
-          <div class="aktion" id="g-aktion">...</div>
-          <div class="grund" id="g-grund">Warte auf die KI-Zentrale</div>
-          <div class="meta" id="g-meta"></div>
-        </div>
-      </div>
-      <div class="karte">
-        <div class="reiter" id="ansichten">
-          <button data-ansicht="ki" class="aktiv">KI-Sicht</button>
-          <button data-ansicht="linie">Linie</button>
-          <button data-ansicht="lidar">LiDAR-Radar</button>
-          <button data-ansicht="tiefe">Tiefe</button>
-        </div>
-        <div class="bildflaeche">
-          <img id="live" alt="Live-Bild">
-          <canvas id="radar" hidden></canvas>
-        </div>
-        <div id="lidar-regler" class="lidar-regler" hidden></div>
-        <p class="hinweis" id="ansicht-hinweis"></p>
+<!-- ============ DASHBOARD: alles auf einen Blick ============ -->
+<section id="s-dashboard" class="dash">
+  <div class="feld f-gedanke">
+    <div class="gedanke stopp" id="gedanke">
+      <div class="kreis" id="g-icon"></div>
+      <div style="min-width:0">
+        <div class="aktion" id="g-aktion">...</div>
+        <div class="grund" id="g-grund">Warte auf die KI-Zentrale</div>
+        <div class="meta" id="g-meta"></div>
       </div>
     </div>
-    <div>
-      <div class="karte">
-        <h2>Steuerung</h2>
-        <div class="segmente" id="szenarien"></div>
-        <div class="tempo">
-          <span>Tempo</span>
-          <input type="range" id="tempo" min="0.05" max="0.4" step="0.01" value="0.15">
-          <b id="tempo-wert">0,15 m/s</b>
-        </div>
-        <div class="knoepfe">
-          <button class="k-start" onclick="aktion('start')">START</button>
-          <button class="k-test" onclick="aktion('test')">TEST</button>
-          <button class="k-stopp" onclick="aktion('stopp')">STOPP</button>
-        </div>
-        <div id="antwort"></div>
+  </div>
+
+  <div class="feld f-karte" id="platz-karte">
+    <div class="widget" id="w-karte">
+      <div class="kz">
+        <b>Karte</b>
+        <button data-km="2d" class="aktiv">2D</button><button data-km="3d">3D</button>
+        <button id="k-folgen" class="aktiv" title="Ansicht folgt dem Roboter">Folgen</button>
+        <button id="k-ganz" title="ganze Karte zeigen">Ganz</button>
       </div>
-      <div class="karte">
-        <h2>Was der Roboter wahrnimmt</h2>
-        <div class="sinne">
-          <div class="sinn" id="sn-ampel"><div class="titel">Ampel</div>
-            <div class="ampel"><i class="g"></i><i class="y"></i><i class="r"></i></div>
-            <div class="klein" id="sn-ampel-t">keine gesehen</div></div>
-          <div class="sinn" id="sn-schild"><div class="titel">Stoppschild</div>
-            <div class="wert" id="sn-schild-w">-</div><div class="klein" id="sn-schild-t"></div></div>
-          <div class="sinn" id="sn-lidar"><div class="titel">LiDAR vorne</div>
-            <div class="wert" id="sn-lidar-w">-</div><div class="balken"><div id="sn-lidar-b"></div></div></div>
-          <div class="sinn" id="sn-tiefe"><div class="titel">Tiefenkamera</div>
-            <div class="wert" id="sn-tiefe-w">-</div><div class="klein">ragt etwas aus dem Boden?</div></div>
-          <div class="sinn" id="sn-linie"><div class="titel">Linie</div>
-            <div class="wert" id="sn-linie-w">-</div><div class="klein" id="sn-linie-t"></div></div>
-          <div class="sinn" id="sn-ki"><div class="titel">Kamera-KI</div>
-            <div class="wert" id="sn-ki-w">-</div><div class="klein" id="sn-ki-t"></div></div>
-          <div class="sinn breit"><div class="titel">KI sieht gerade</div><div class="chips" id="sn-objekte"></div></div>
-        </div>
-      </div>
-      <div class="karte">
-        <h2>Ereignisse</h2>
-        <ul class="ereignisse" id="ereignisse"><li>noch nichts</li></ul>
+      <div class="flaeche" id="k-flaeche">
+        <canvas id="karte2d"></canvas>
+        <canvas id="karte3d" hidden></canvas>
+        <div class="info" id="k-info">Karte: warte auf den Kartografen ...</div>
       </div>
     </div>
+  </div>
+
+  <div class="feld f-kamera" id="platz-kamera">
+    <div class="widget" id="w-kamera">
+      <div class="kz">
+        <b>Kamera</b>
+        <button data-ansicht="ki" class="aktiv">KI-Sicht</button><button data-ansicht="linie">Linie</button><button data-ansicht="tiefe">Tiefe</button>
+      </div>
+      <div class="flaeche"><img id="live" alt="Live-Bild"></div>
+    </div>
+  </div>
+
+  <div class="feld f-lidar" id="platz-lidar">
+    <div class="widget" id="w-lidar">
+      <div class="kz">
+        <b>LiDAR</b>
+        <button data-zoom="0.5">±50 cm</button><button data-zoom="1" class="aktiv">±1 m</button><button data-zoom="2">±2 m</button>
+      </div>
+      <div class="flaeche"><canvas id="radar"></canvas></div>
+    </div>
+  </div>
+
+  <div class="feld f-steuer">
+    <div class="steuer">
+      <div class="knoepfe">
+        <button class="k-start" onclick="aktion('start')">START</button>
+        <button class="k-test" onclick="aktion('test')">TEST</button>
+        <button class="k-stopp" onclick="aktion('stopp')">STOPP</button>
+      </div>
+      <div class="segmente" id="szenarien"></div>
+      <div class="tempo">
+        <span>Tempo</span>
+        <input type="range" id="tempo" min="0.05" max="0.4" step="0.01" value="0.15">
+        <b id="tempo-wert">0,15 m/s</b>
+      </div>
+      <div id="antwort"></div>
+      <div class="chips" id="sinne"></div>
+      <div class="chips" id="objekte"></div>
+    </div>
+  </div>
+
+  <div class="feld f-log">
+    <div class="log">
+      <h2>Ereignisse</h2>
+      <ul class="ereignisse" id="ereignisse"><li>noch nichts</li></ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============ KARTE (gross) ============ -->
+<section id="s-karte" hidden>
+  <div id="gross-karte" class="gross-mit-leiste"></div>
+  <div class="karte">
+    <div class="zeile" style="margin-top:0">
+      <button onclick="aktion('umschauen', {}, 'karte-antwort')" title="KI haelt kurz an und schaut mit der Kamera nach links und rechts">Umschauen</button>
+      <button onclick="aktion('karte_speichern', {}, 'karte-antwort')">Speichern</button>
+      <a class="knopf" href="/karte/export.png">Bild herunterladen (PNG)</a>
+      <a class="knopf" href="/karte/export.ply">3D herunterladen (PLY)</a>
+      <button onclick="if (confirm('Neue, leere Karte anfangen? Die alte wird als Sicherung behalten.')) aktion('karte_neu', {}, 'karte-antwort')">Neue Karte</button>
+      <button onclick="aktion(S && S.kartograf ? 'karte_stopp' : 'karte_start', {}, 'karte-antwort')" id="k-prozess">Kartograf</button>
+      <label class="schalter" style="font-size:15px"><input type="checkbox" id="k-lidar" checked> LiDAR live</label>
+    </div>
+    <div class="zeile legende">
+      <span><i style="background:#e8e8e4"></i>frei (befahrbar)</span>
+      <span><i style="background:#283240"></i>Wand / Hindernis (LiDAR)</span>
+      <span><i style="background:#969696"></i>noch unbekannt</span>
+      <span><i style="background:linear-gradient(90deg,#bbb,#222)"></i>Bodenfoto (Kamera)</span>
+      <span><i style="background:#22d3ee"></i>LiDAR jetzt</span>
+      <span><i style="background:#3b82f6"></i>gefahrener Weg</span>
+    </div>
+    <pre id="karte-antwort">-</pre>
+    <p class="hinweis">Ziehen = verschieben, Mausrad/zwei Finger = zoomen. 3D: ziehen = drehen, mit Umschalt/rechter Maustaste = verschieben.
+      Die Karte wird bei jeder Fahrt genauer. Wo der Roboter steht, findet er beim Start selbst (Scan-Abgleich mit der Karte).</p>
+  </div>
+</section>
+
+<!-- ============ KAMERA (gross) ============ -->
+<section id="s-kamera" hidden>
+  <div id="gross-kamera" class="gross-mit-leiste"></div>
+  <div class="karte"><p class="hinweis" id="kamera-hinweis" style="margin:0"></p></div>
+</section>
+
+<!-- ============ LIDAR (gross) ============ -->
+<section id="s-lidar" hidden>
+  <div id="gross-lidar" class="gross-mit-leiste"></div>
+  <div class="karte">
+    <div id="lidar-regler" class="lidar-regler"></div>
+    <p class="hinweis">Draufsicht, oben = vorne. Der LiDAR misst nur in einer dünnen waagrechten Scheibe auf seiner Höhe: ein Schuh
+      ist nur ein kurzer Bogen (seine Vorderkante). Gelber Streifen = Fahrschlauch entlang der Linie: nur was dort liegt, prüft die KI
+      (orange). Rot = Notbremse. Steht ein Gegenstand vor der Kamera-Seite, die Punkte erscheinen aber nicht oben: mit den Pfeilen drehen
+      und speichern.</p>
   </div>
 </section>
 
@@ -241,9 +311,7 @@
     <h2>Greifarm</h2>
     <div class="warnkasten"><b>Achtung:</b> Der Arm bewegt sich wirklich. Hände weg, Platz rundherum lassen.
       Die Kamera sitzt am Arm: Vor START immer zurück in die <b>Fahrstellung</b>.
-      Der Roboter meldet die Armstellung nicht zurück, die Regler zeigen nur, was zuletzt geschickt wurde.
-      Schnittstelle stammt aus einem öffentlichen Treiber und ist auf eurem Roboter noch nicht geprüft
-      (zuerst "Arm-Topics anzeigen": dort muss <code>/arm6_joints</code> stehen).</div>
+      Der Roboter meldet die Armstellung nicht zurück, die Regler zeigen nur, was zuletzt geschickt wurde.</div>
     <div id="servos"></div>
     <div class="zeile">
       <span>Dauer</span><input type="range" id="armzeit" min="500" max="5000" step="100" value="2000"><b id="armzeit-w">2,0 s</b>
@@ -253,14 +321,19 @@
       <button onclick="aktion('arm_greifer', {auf: true, winkel: regler()}, 'arm-antwort')">Greifer auf</button>
       <button onclick="aktion('arm_greifer', {auf: false, winkel: regler()}, 'arm-antwort')">Greifer zu</button>
     </div>
+    <h2 style="margin-top:16px">Gespeicherte Posen anfahren</h2>
     <div class="zeile" id="posen"></div>
-    <div class="zeile">
-      <button onclick="armSpeichern('fahrstellung')">Regler als Fahrstellung speichern</button>
-      <button onclick="armSpeichern('pruefblick')">Regler als Prüfblick speichern</button>
-      <button onclick="armSpeichern(prompt('Name der Pose (klein, ohne Leerzeichen):'))">... als eigene Pose</button>
-    </div>
+  </div>
+  <div class="karte">
+    <h2>Posen einlernen</h2>
+    <p class="hinweis" style="margin-top:0">Arm mit den Reglern in die Stellung bringen, mit "Pose anfahren" prüfen, dann hier speichern.
+      Gespeichert wird in <code>config/lokal/arm.yaml</code> (bleibt bei Updates erhalten). Danach KI neu starten (System).</p>
+    <div class="lernen" id="lernen"></div>
+    <div class="zeile"><button onclick="armSpeichern(prompt('Name der Pose (klein, ohne Leerzeichen):'))">... als eigene Pose speichern</button></div>
     <div class="zeile schalter"><input type="checkbox" id="arm-ki" onchange="aktion('arm_ki', {erlaubt: this.checked}, 'arm-antwort')">
-      <label for="arm-ki">KI darf den Arm bewegen (bei unklarer LiDAR-Meldung im Stand kurz in den Prüfblick schauen)</label></div>
+      <label for="arm-ki">KI darf den Arm bewegen (nur im Stand): genauer hinschauen (Prüfblick), am Zebrastreifen und für die Karte
+        umschauen (Blick links/rechts), kleine Hindernisse aufheben und beiseitelegen (Greifen, Greifen hoch, Ablegen).
+        Fehlt eine Pose, macht die KI das jeweilige einfach nicht.</label></div>
     <pre id="arm-antwort">-</pre>
     <button onclick="aktion('arm_diagnose', {}, 'arm-antwort')">Arm-Topics anzeigen (nur lesen)</button>
   </div>
@@ -268,11 +341,17 @@
 
 <!-- ============ SENSOREN ============ -->
 <section id="s-sensoren" hidden>
-  <div class="karte">
-    <h2>Akku</h2>
-    <div class="akkugross" id="akku-gross">keine Daten</div>
-    <div class="akkubalken"><div id="akku-balken"></div></div>
-    <p class="hinweis">Prozent ist eine grobe Schätzung aus der Spannung (3 Zellen: 12,6 V voll, 10,5 V leer).</p>
+  <div class="raster2">
+    <div class="karte">
+      <h2>Akku</h2>
+      <div class="akkugross" id="akku-gross">keine Daten</div>
+      <div class="akkubalken"><div id="akku-balken"></div></div>
+      <p class="hinweis">Prozent ist eine grobe Schätzung aus der Spannung (3 Zellen: 12,6 V voll, 10,5 V leer).</p>
+    </div>
+    <div class="karte">
+      <h2>Programme</h2>
+      <table id="programmtabelle"></table>
+    </div>
   </div>
   <div class="karte">
     <h2>Sensoren</h2>
@@ -297,6 +376,8 @@
       <button onclick="aktion('kamera_start', {}, 'sys-antwort')">Kamera starten</button>
       <button onclick="aktion('ki_start', {}, 'sys-antwort')">KI-Zentrale starten</button>
       <button onclick="aktion('ki_stopp', {}, 'sys-antwort')">KI-Zentrale stoppen</button>
+      <button onclick="aktion('karte_start', {}, 'sys-antwort')">Kartograf starten</button>
+      <button onclick="aktion('karte_stopp', {}, 'sys-antwort')">Kartograf stoppen</button>
       <button onclick="aktion('update', {}, 'sys-antwort')">Neueste Version holen</button>
       <button onclick="if (confirm('Panel beenden? Roboter hält an.')) aktion('beenden', {}, 'sys-antwort')">Panel beenden</button>
     </div>
@@ -307,33 +388,39 @@
 
 <script>
 const $ = id => document.getElementById(id);
-let S = null, seite = 'cockpit', ansicht = 'ki', lidarZoom = 1.0;
+let S = null, seite = 'dashboard', ansicht = 'ki', lidarZoom = 1.0, lidarDaten = null;
 const ICON = {
   fahren: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>',
   langsam: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17v.5"/></svg>',
   stopp: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 2h8l6 6v8l-6 6H8l-6-6V8z"/></svg>',
+  manoever: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M4 12a8 8 0 1 0 3-6.2"/><path d="M4 4v5h5"/></svg>',
 };
-const HINWEIS = {
-  ki: 'Alles, was die KI sieht: Kästen = erkannte Dinge (rot = im Weg), farbige Ringe = leuchtende Ampel-LED, oben die Entscheidung.',
-  linie: 'Was der Linienfolger sieht: grün = erkannte Linie, roter Punkt = Ziel, blaue Linie = Beginn des Suchbereichs. Läuft nur nach START oder TEST.',
-  lidar: 'Draufsicht, oben = vorne. Der LiDAR misst nur in einer dünnen waagrechten Scheibe auf seiner Höhe: ein Schuh ist nur ein kurzer Bogen (seine Vorderkante), keine Fläche. Rot = Notbremse, orange = KI prüft. Steht ein Gegenstand vor der Kamera-Seite, aber die Punkte erscheinen nicht oben: mit den Pfeilen drehen und speichern.',
+const KAMERA_HINWEIS = {
+  ki: 'KI-Sicht: Kästen = erkannte Dinge (rot = im Weg), farbige Ringe = leuchtende Ampel-LED, weiß = Einfahrt verboten, oben die Entscheidung.',
+  linie: 'Linienfolger: grün = erkannte Linie, rechts oben die Draufsicht (so rechnet er). Läuft nur nach START oder TEST.',
   tiefe: 'Tiefenkamera: Farbe = Abstand (rot nah, blau fern, schwarz = keine Messung).',
 };
 const fmt = (x, n = 2) => Number(x).toFixed(n).replace('.', ',');
+const sichtbar = el => el && el.offsetParent !== null;
 
-// ---------- Seiten / Ansichten ----------
-document.querySelectorAll('.seiten button').forEach(b => b.onclick = () => {
-  seite = b.dataset.seite;
-  document.querySelectorAll('.seiten button').forEach(x => x.classList.toggle('aktiv', x === b));
-  document.querySelectorAll('main > section').forEach(s => s.hidden = s.id !== 's-' + seite);
-});
-document.querySelectorAll('#ansichten button').forEach(b => b.onclick = () => {
-  ansicht = b.dataset.ansicht;
-  document.querySelectorAll('#ansichten button').forEach(x => x.classList.toggle('aktiv', x === b));
-  $('live').hidden = ansicht === 'lidar'; $('radar').hidden = ansicht !== 'lidar'; $('lidar-regler').hidden = ansicht !== 'lidar';
-  $('ansicht-hinweis').textContent = HINWEIS[ansicht];
-});
-$('ansicht-hinweis').textContent = HINWEIS.ki;
+// ---------- Seiten: Kamera, Karte und LiDAR wandern zwischen Dashboard und eigener Seite ----------
+const WIDGETS = { karte: 'w-karte', kamera: 'w-kamera', lidar: 'w-lidar' };
+function zeigeSeite(neu) {
+  seite = neu;
+  document.querySelectorAll('.seiten button').forEach(x => x.classList.toggle('aktiv', x.dataset.seite === neu));
+  for (const [name, id] of Object.entries(WIDGETS)) {
+    const ziel = neu === name ? $('gross-' + name) : $('platz-' + name);
+    if ($(id).parentElement !== ziel) ziel.appendChild($(id));
+  }
+  document.querySelectorAll('main > section').forEach(s => s.hidden = s.id !== 's-' + neu);
+  try { localStorage.setItem('seite', neu); } catch (e) {}
+  karteNeuZeichnen = true;
+  if (S) status();
+}
+document.querySelectorAll('.seiten button').forEach(b => b.onclick = () => zeigeSeite(b.dataset.seite));
+function kopfHoehe() { document.documentElement.style.setProperty('--kopf-h', $('kopf').offsetHeight + 'px'); }
+window.addEventListener('resize', () => { kopfHoehe(); karteNeuZeichnen = true; });
+kopfHoehe();
 
 // ---------- Aktionen ----------
 async function aktion(name, daten = {}, ziel = 'antwort') {
@@ -345,26 +432,38 @@ async function aktion(name, daten = {}, ziel = 'antwort') {
 $('tempo').oninput = () => $('tempo-wert').textContent = fmt($('tempo').value) + ' m/s';
 $('tempo').onchange = () => aktion('tempo', { wert: Number($('tempo').value) });
 
-// ---------- Live-Bild: immer erst das naechste holen, wenn das vorige da ist (kein Stau) ----------
+// ---------- Kamera: immer erst das naechste Bild holen, wenn das vorige da ist (kein Stau) ----------
+document.querySelectorAll('#w-kamera [data-ansicht]').forEach(b => b.onclick = () => {
+  ansicht = b.dataset.ansicht;
+  document.querySelectorAll('#w-kamera [data-ansicht]').forEach(x => x.classList.toggle('aktiv', x === b));
+  $('kamera-hinweis').textContent = KAMERA_HINWEIS[ansicht];
+});
+$('kamera-hinweis').textContent = KAMERA_HINWEIS.ki;
 function bildSchleife() {
   const img = $('live');
-  if (seite !== 'cockpit' || ansicht === 'lidar') { setTimeout(bildSchleife, 300); return; }
+  if (!sichtbar(img)) { setTimeout(bildSchleife, 300); return; }
   const quelle = { ki: '/bild/ki.jpg', linie: '/bild/linie.jpg', tiefe: '/bild/tiefe.jpg' }[ansicht];
   const neu = new Image();
-  neu.onload = () => { img.src = neu.src; setTimeout(bildSchleife, 60); };
+  neu.onload = () => { img.src = neu.src; setTimeout(bildSchleife, seite === 'kamera' ? 50 : 90); };
   neu.onerror = () => setTimeout(bildSchleife, 800);
   neu.src = quelle + '?t=' + Date.now();
 }
 bildSchleife();
 
-// ---------- LiDAR-Radar ----------
-async function radarSchleife() {
-  if (seite === 'cockpit' && ansicht === 'lidar') {
-    try { zeichneRadar(await (await fetch('/api/lidar')).json()); } catch (e) {}
+// ---------- LiDAR ----------
+document.querySelectorAll('#w-lidar [data-zoom]').forEach(b => b.onclick = () => {
+  lidarZoom = Number(b.dataset.zoom);
+  document.querySelectorAll('#w-lidar [data-zoom]').forEach(x => x.classList.toggle('aktiv', x === b));
+});
+async function lidarSchleife() {
+  const radarDa = sichtbar($('radar'));
+  if (radarDa) {
+    try { lidarDaten = await (await fetch('/api/lidar')).json(); } catch (e) { lidarDaten = null; }
+    if (lidarDaten) zeichneRadar(lidarDaten);
   }
-  setTimeout(radarSchleife, 180);
+  setTimeout(lidarSchleife, radarDa ? 150 : 400);
 }
-radarSchleife();
+lidarSchleife();
 let reglerGebaut = false;
 function baueLidarRegler(d) {
   const box = $('lidar-regler'); box.innerHTML = '';
@@ -381,63 +480,318 @@ function baueLidarRegler(d) {
   });
   const sp = document.createElement('button'); sp.textContent = 'Speichern'; sp.style.background = 'var(--blau)';
   sp.onclick = () => aktion('lidar_speichern'); box.appendChild(sp);
-  for (const z of [0.5, 1, 2]) {
-    const b = document.createElement('button'); b.textContent = `±${String(z).replace('.', ',')} m`;
-    b.onclick = () => lidarZoom = z; box.appendChild(b);
-  }
   reglerGebaut = true;
+}
+function leinwand(c) {
+  const dpr = window.devicePixelRatio || 1, W = c.clientWidth, H = c.clientHeight;
+  if (!W || !H) return null;
+  if (c.width !== Math.round(W * dpr) || c.height !== Math.round(H * dpr)) { c.width = Math.round(W * dpr); c.height = Math.round(H * dpr); }
+  const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return [g, W, H];
+}
+function schlauch(weg, breite) {
+  // Fahrschlauch: Streifen entlang der Linie (wie die KI prueft), als Vieleck links + rechts
+  const p = [[0, 0]].concat(weg && weg.length ? weg.filter(q => q[0] > 0.02) : [[0.8, 0]]);
+  if (p.length < 2) p.push([0.8, 0]);
+  let laenge = 0; for (let i = 1; i < p.length; i++) laenge += Math.hypot(p[i][0] - p[i - 1][0], p[i][1] - p[i - 1][1]);
+  if (laenge < 0.8) {
+    const a = p[p.length - 2], b = p[p.length - 1], l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+    p.push([b[0] + (b[0] - a[0]) / l * (0.8 - laenge), b[1] + (b[1] - a[1]) / l * (0.8 - laenge)]);
+  }
+  const links = [], rechts = [];
+  for (let i = 0; i < p.length; i++) {
+    const a = p[Math.max(0, i - 1)], b = p[Math.min(p.length - 1, i + 1)];
+    const l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, nx = -(b[1] - a[1]) / l, ny = (b[0] - a[0]) / l;
+    links.push([p[i][0] + nx * breite / 2, p[i][1] + ny * breite / 2]);
+    rechts.push([p[i][0] - nx * breite / 2, p[i][1] - ny * breite / 2]);
+  }
+  return links.concat(rechts.reverse());
 }
 function zeichneRadar(d) {
   if (!reglerGebaut) baueLidarRegler(d);
   d.scans.forEach((s, i) => { const el = $('lw' + i); if (el) el.textContent = Math.round(s.front_deg) + '°'; });
-  const c = $('radar'), dpr = window.devicePixelRatio || 1;
-  const W = c.clientWidth, H = c.clientHeight;
-  if (!W || !H) return;
-  if (c.width !== W * dpr) { c.width = W * dpr; c.height = H * dpr; }
-  const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const l = leinwand($('radar')); if (!l) return;
+  const [g, W, H] = l;
   g.fillStyle = '#05080f'; g.fillRect(0, 0, W, H);
-  const cx = W / 2, cy = H * 0.62, px = Math.min(W / 2, H * 0.62) / lidarZoom * 0.95; // Pixel pro Meter
+  const cx = W / 2, cy = H * 0.66, px = Math.min(W / 2, H * 0.66) / lidarZoom * 0.95;  // Pixel pro Meter
   const P = (x, y) => [cx - y * px, cy - x * px];   // x = vorne, y = links
-  // Zonen
+  // Fahrschlauch (was die KI prueft) + Notbremse
+  const ki = S && S.ki;
+  const poly = schlauch(ki ? ki.weg : null, ki && ki.fahrschlauch ? ki.fahrschlauch : 0.3);
+  g.beginPath(); poly.forEach(([x, y], i) => { const [a, b] = P(x, y); i ? g.lineTo(a, b) : g.moveTo(a, b); }); g.closePath();
+  g.fillStyle = '#f5b30126'; g.fill(); g.strokeStyle = '#f5b30166'; g.stroke();
   const halb = d.halb_deg * Math.PI / 180;
-  for (const [r, farbe] of [[d.pruef, '#f5b30130'], [d.notbremse, '#ef444450']]) {
-    g.beginPath(); g.moveTo(cx, cy); g.arc(cx, cy, r * px, -Math.PI / 2 - halb, -Math.PI / 2 + halb); g.closePath();
-    g.fillStyle = farbe; g.fill();
-  }
+  g.beginPath(); g.moveTo(cx, cy); g.arc(cx, cy, d.notbremse * px, -Math.PI / 2 - halb, -Math.PI / 2 + halb); g.closePath();
+  g.fillStyle = '#ef444450'; g.fill();
   // Ringe
-  g.strokeStyle = '#24324d'; g.fillStyle = '#5c6f8f'; g.font = '13px system-ui'; g.lineWidth = 1;
+  g.strokeStyle = '#24324d'; g.fillStyle = '#5c6f8f'; g.font = '12px system-ui'; g.lineWidth = 1;
   const schritt = lidarZoom <= 0.5 ? 0.1 : lidarZoom <= 1 ? 0.25 : 0.5;
-  for (let r = schritt; r <= lidarZoom * 1.6; r += schritt) {
+  for (let r = schritt; r <= lidarZoom * 1.7; r += schritt) {
     g.beginPath(); g.arc(cx, cy, r * px, 0, 2 * Math.PI); g.stroke();
-    g.fillText(Math.round(r * 100) + ' cm', cx + 4, cy - r * px - 4);
+    g.fillText(Math.round(r * 100) + ' cm', cx + 4, cy - r * px - 3);
   }
   // Roboter
-  g.fillStyle = '#334155'; g.fillRect(cx - 0.12 * px, cy - 0.15 * px, 0.24 * px, 0.3 * px);
-  g.fillStyle = '#e6edf7'; g.beginPath(); g.moveTo(cx, cy - 0.22 * px); g.lineTo(cx - 8, cy - 0.15 * px + 2); g.lineTo(cx + 8, cy - 0.15 * px + 2); g.fill();
-  // Punkte
+  g.fillStyle = '#334155'; g.fillRect(cx - 0.13 * px, cy - 0.15 * px, 0.26 * px, 0.3 * px);
+  g.fillStyle = '#e6edf7'; g.beginPath(); g.moveTo(cx, cy - 0.22 * px); g.lineTo(cx - 7, cy - 0.15 * px + 2); g.lineTo(cx + 7, cy - 0.15 * px + 2); g.fill();
+  // Punkte (orange = im Fahrschlauch und naeher als der Pruefabstand)
   const farben = ['#22d3ee', '#a78bfa'];
+  const imSchlauch = (x, y) => {   // Punkt im Vieleck?
+    let drin = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const [xi, yi] = poly[i], [xj, yj] = poly[j];
+      if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) drin = !drin;
+    }
+    return drin;
+  };
+  const r0 = Math.max(2, Math.min(3.5, px / 120));
   d.scans.forEach((s, i) => {
     for (const [x, y] of s.punkte) {
-      const r = Math.hypot(x, y), a = Math.abs(Math.atan2(y, x));
+      const r = Math.hypot(x, y);
       let f = farben[i % 2];
-      if (x > 0 && a <= halb && r < d.pruef) f = r < d.notbremse ? '#ef4444' : '#f5b301';
+      if (x > 0 && Math.abs(Math.atan2(y, x)) <= halb && r < d.notbremse) f = '#ef4444';
+      else if (r < d.pruef + 0.1 && imSchlauch(x, y)) f = '#f5b301';
       const [qx, qy] = P(x, y);
-      g.fillStyle = f; g.beginPath(); g.arc(qx, qy, 3.2, 0, 2 * Math.PI); g.fill();
+      g.fillStyle = f; g.beginPath(); g.arc(qx, qy, r0, 0, 2 * Math.PI); g.fill();
     }
   });
-  // Legende
-  g.font = '15px system-ui';
-  d.scans.forEach((s, i) => { g.fillStyle = farben[i % 2]; g.fillText(`● ${s.topic} ${s.aktiv ? '' : '(keine Daten)'}`, 12, 22 + i * 20); });
-  g.fillStyle = '#e6edf7'; g.font = 'bold 22px system-ui';
-  const n = d.naechster_vorne;
-  g.fillText(n == null ? 'vorne frei' : `vorne: ${Math.round(n * 100)} cm`, W - 190, 30);
+  g.font = '13px system-ui';
+  d.scans.forEach((s, i) => { g.fillStyle = farben[i % 2]; g.fillText(`● ${s.topic}${s.aktiv ? '' : ' (keine Daten)'}`, 10, 18 + i * 17); });
+  g.fillStyle = '#e6edf7'; g.font = 'bold 17px system-ui'; g.textAlign = 'right';
+  const n = ki ? ki.lidar : null;
+  g.fillText(n == null ? 'LiDAR?' : n >= 5 ? 'Weg frei' : `im Weg: ${Math.round(n * 100)} cm`, W - 10, 22);
+  g.textAlign = 'left';
 }
 
-// ---------- Arm ----------
+// ================= KARTE =================
+const K = { modus: '2d', info: null, infoZeit: 0, bild: null, s: 120, cx: 0, cy: 0, folgen: true, ganz: true,
+            wolke: null, wolkeZeit: 0, cam: { yaw: -2.2, pitch: 0.75, dist: 3, tx: 0, ty: 0, tz: 0 }, cam3dGesetzt: false };
+let karteNeuZeichnen = true;
+const MARKER_FARBE = { ampel: '#22c55e', stoppschild: '#ef4444', zebra: '#f8fafc', einfahrt_verboten: '#f97316', hindernis: '#f5b301', person: '#a78bfa' };
+const MARKER_ZEICHEN = { ampel: 'A', stoppschild: 'S', zebra: 'Z', einfahrt_verboten: 'E', hindernis: 'H', person: 'P' };
+document.querySelectorAll('#w-karte [data-km]').forEach(b => b.onclick = () => {
+  K.modus = b.dataset.km;
+  document.querySelectorAll('#w-karte [data-km]').forEach(x => x.classList.toggle('aktiv', x === b));
+  $('karte2d').hidden = K.modus !== '2d'; $('karte3d').hidden = K.modus !== '3d';
+  if (K.modus === '3d') wolkeLaden(true);
+  karteNeuZeichnen = true;
+});
+$('k-folgen').onclick = () => { K.folgen = !K.folgen; K.ganz = false; $('k-folgen').classList.toggle('aktiv', K.folgen); karteNeuZeichnen = true; };
+$('k-ganz').onclick = () => { K.ganz = true; K.folgen = false; $('k-folgen').classList.remove('aktiv'); K.cam3dGesetzt = false; karteNeuZeichnen = true; };
+$('k-lidar').onchange = () => karteNeuZeichnen = true;
+
+async function karteSchleife() {
+  if (sichtbar($('w-karte'))) {
+    try {
+      const info = await (await fetch('/karte/info.json?t=' + Date.now())).json();
+      if (info.zeit !== K.infoZeit) {
+        K.infoZeit = info.zeit; K.info = info;
+        const b = new Image();
+        b.onload = () => { K.bild = b; karteNeuZeichnen = true; };
+        b.src = '/karte/bild.png?t=' + Date.now();
+        if (K.modus === '3d') wolkeLaden(false);
+      }
+    } catch (e) { K.info = null; }
+  }
+  setTimeout(karteSchleife, 2500);
+}
+karteSchleife();
+async function wolkeLaden(sofort) {
+  if (!sofort && Date.now() - K.wolkeZeit < 6000) return;
+  K.wolkeZeit = Date.now();
+  try {
+    const buf = await (await fetch('/karte/wolke.bin?t=' + Date.now())).arrayBuffer();
+    const n = new Uint32Array(buf, 0, 1)[0];
+    K.wolke = { n, xyz: new Float32Array(buf, 4, n * 3), rgb: new Uint8Array(buf, 4 + n * 12, n * 3) };
+    karteNeuZeichnen = true;
+  } catch (e) {}
+}
+function roboterPose() { const k = S && S.karte; return k && k.x !== undefined ? [k.x, k.y, k.w] : null; }
+
+// ---- 2D ----
+function zeichne2D() {
+  const l = leinwand($('karte2d')); if (!l) return;
+  const [g, W, H] = l, info = K.info, pose = roboterPose();
+  g.fillStyle = '#0b1220'; g.fillRect(0, 0, W, H);
+  if (!info || !info.bereich) {
+    g.fillStyle = '#8da2c0'; g.font = '15px system-ui'; g.textAlign = 'center';
+    g.fillText(S && S.kartograf ? 'Karte entsteht, sobald der Roboter fährt ...' : 'Kartograf läuft nicht (startet mit der KI)', W / 2, H / 2);
+    g.textAlign = 'left'; return;
+  }
+  const [x0, y0, x1, y1] = info.bereich;
+  if (K.ganz) { K.s = Math.min(W / (x1 - x0), H / (y1 - y0)) * 0.96; K.cx = (x0 + x1) / 2; K.cy = (y0 + y1) / 2; }
+  else if (K.folgen && pose) { K.cx += (pose[0] - K.cx) * 0.5; K.cy += (pose[1] - K.cy) * 0.5; }
+  const P = (x, y) => [W / 2 + (x - K.cx) * K.s, H / 2 - (y - K.cy) * K.s];
+  if (K.bild) {
+    const [a, b] = P(x0, y1);
+    g.imageSmoothingEnabled = K.s < 150;
+    g.drawImage(K.bild, a, b, (x1 - x0) * K.s, (y1 - y0) * K.s);
+  }
+  // gefahrener Weg
+  if (info.pfad && info.pfad.length > 1) {
+    g.strokeStyle = '#3b82f6aa'; g.lineWidth = 2; g.beginPath();
+    info.pfad.forEach(([x, y], i) => { const [a, b] = P(x, y); i ? g.lineTo(a, b) : g.moveTo(a, b); });
+    if (pose) { const [a, b] = P(pose[0], pose[1]); g.lineTo(a, b); }
+    g.stroke();
+  }
+  // LiDAR jetzt (vom Kartografen schon in Kartenkoordinaten, passt also genau zur Karte)
+  const scan = S && S.karte && S.karte.scan;
+  if (scan && $('k-lidar').checked) {
+    g.fillStyle = '#22d3ee';
+    for (const [x, y] of scan) { const [a, b] = P(x, y); g.fillRect(a - 1.5, b - 1.5, 3, 3); }
+  }
+  // Marker der KI
+  g.font = 'bold 12px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  for (const m of info.marker || []) {
+    const [a, b] = P(m.x, m.y);
+    g.fillStyle = MARKER_FARBE[m.art] || '#fff'; g.beginPath(); g.arc(a, b, 10, 0, 2 * Math.PI); g.fill();
+    g.strokeStyle = '#0b1220'; g.lineWidth = 2; g.stroke();
+    g.fillStyle = '#0b1220'; g.fillText(MARKER_ZEICHEN[m.art] || '?', a, b + 0.5);
+    if (K.s > 90) { g.fillStyle = '#e6edf7'; g.font = '12px system-ui'; g.fillText(m.name, a, b + 20); g.font = 'bold 12px system-ui'; }
+  }
+  g.textAlign = 'left'; g.textBaseline = 'alphabetic';
+  // Roboter
+  if (pose) {
+    const [a, b] = P(pose[0], pose[1]), w = -pose[2], r = Math.max(10, 0.16 * K.s);
+    g.save(); g.translate(a, b); g.rotate(w);
+    g.fillStyle = '#f43f5e'; g.strokeStyle = '#fff'; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(r, 0); g.lineTo(-r * 0.7, r * 0.6); g.lineTo(-r * 0.4, 0); g.lineTo(-r * 0.7, -r * 0.6); g.closePath(); g.fill(); g.stroke();
+    g.restore();
+  }
+  // Massstab
+  const m = K.s > 300 ? 0.1 : K.s > 120 ? 0.5 : 1.0;
+  g.fillStyle = '#e6edf7'; g.fillRect(W - 14 - m * K.s, H - 14, m * K.s, 3);
+  g.font = '12px system-ui'; g.fillText(m >= 1 ? m + ' m' : Math.round(m * 100) + ' cm', W - 14 - m * K.s, H - 20);
+}
+
+// ---- 3D (eigener kleiner Punktwolken-Betrachter, braucht kein Internet) ----
+function zeichne3D() {
+  const c = $('karte3d'), W = c.clientWidth, H = c.clientHeight;
+  if (!W || !H) return;
+  if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
+  const g = c.getContext('2d');
+  const w = K.wolke, pose = roboterPose();
+  if (!w || !w.n) {
+    g.fillStyle = '#0b1220'; g.fillRect(0, 0, W, H);
+    g.fillStyle = '#8da2c0'; g.font = '15px system-ui'; g.textAlign = 'center'; g.fillText('Noch keine 3D-Punkte ...', W / 2, H / 2); g.textAlign = 'left';
+    return;
+  }
+  const cam = K.cam;
+  if (!K.cam3dGesetzt && K.info && K.info.bereich) {
+    const [x0, y0, x1, y1] = K.info.bereich;
+    cam.tx = (x0 + x1) / 2; cam.ty = (y0 + y1) / 2; cam.tz = 0; cam.dist = Math.max(x1 - x0, y1 - y0) * 0.8;
+    K.cam3dGesetzt = true;
+  }
+  if (K.folgen && pose) { cam.tx += (pose[0] - cam.tx) * 0.3; cam.ty += (pose[1] - cam.ty) * 0.3; }
+  const cp = Math.cos(cam.pitch), ex = cam.tx + cam.dist * cp * Math.cos(cam.yaw), ey = cam.ty + cam.dist * cp * Math.sin(cam.yaw),
+        ez = cam.tz + cam.dist * Math.sin(cam.pitch);
+  let fx = cam.tx - ex, fy = cam.ty - ey, fz = cam.tz - ez; const fl = Math.hypot(fx, fy, fz); fx /= fl; fy /= fl; fz /= fl;
+  let rx = fy, ry = -fx; const rl = Math.hypot(rx, ry) || 1; rx /= rl; ry /= rl;              // rechts = f x oben
+  const ux = ry * fz, uy = -rx * fz, uz = rx * fy - ry * fx;                                  // oben = rechts x f
+  const F = H / (2 * Math.tan(0.45));
+  const bild = g.createImageData(W, H), pix = new Uint32Array(bild.data.buffer), z = new Float32Array(W * H).fill(1e9);
+  pix.fill(0xff20120b);                                                                        // Hintergrund (ABGR)
+  const { xyz, rgb, n } = w;
+  for (let i = 0; i < n; i++) {
+    const dx = xyz[3 * i] - ex, dy = xyz[3 * i + 1] - ey, dz = xyz[3 * i + 2] - ez;
+    const zc = dx * fx + dy * fy + dz * fz; if (zc < 0.05) continue;
+    const sx = (W / 2 + F * (dx * rx + dy * ry) / zc) | 0, sy = (H / 2 - F * (dx * ux + dy * uy + dz * uz) / zc) | 0;
+    const gr = Math.max(1, Math.min(6, Math.ceil(F * 0.021 / zc)));
+    const farbe = 0xff000000 | (rgb[3 * i + 2] << 16) | (rgb[3 * i + 1] << 8) | rgb[3 * i];
+    for (let a = 0; a < gr; a++) {
+      const yy = sy + a; if (yy < 0 || yy >= H) continue;
+      for (let b = 0; b < gr; b++) {
+        const xx = sx + b; if (xx < 0 || xx >= W) continue;
+        const k = yy * W + xx; if (zc < z[k]) { z[k] = zc; pix[k] = farbe; }
+      }
+    }
+  }
+  g.putImageData(bild, 0, 0);
+  const proj = (x, y, zz) => { const dx = x - ex, dy = y - ey, dz = zz - ez, zc = dx * fx + dy * fy + dz * fz;
+    return zc < 0.05 ? null : [W / 2 + F * (dx * rx + dy * ry) / zc, H / 2 - F * (dx * ux + dy * uy + dz * uz) / zc]; };
+  for (const m of (K.info && K.info.marker) || []) {
+    const a = proj(m.x, m.y, 0.0), b = proj(m.x, m.y, 0.25); if (!a || !b) continue;
+    g.strokeStyle = MARKER_FARBE[m.art] || '#fff'; g.lineWidth = 2; g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+    g.fillStyle = g.strokeStyle; g.beginPath(); g.arc(b[0], b[1], 6, 0, 2 * Math.PI); g.fill();
+    g.font = '12px system-ui'; g.fillStyle = '#e6edf7'; g.fillText(m.name, b[0] + 8, b[1] + 4);
+  }
+  if (pose) {
+    const a = proj(pose[0], pose[1], 0.05), b = proj(pose[0] + 0.2 * Math.cos(pose[2]), pose[1] + 0.2 * Math.sin(pose[2]), 0.05);
+    if (a && b) {
+      g.strokeStyle = '#f43f5e'; g.lineWidth = 4; g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+      g.fillStyle = '#f43f5e'; g.beginPath(); g.arc(a[0], a[1], 7, 0, 2 * Math.PI); g.fill();
+    }
+  }
+}
+
+// ---- Maus und Finger ----
+(function bedienung() {
+  const fl = $('k-flaeche'), zeiger = new Map();
+  let letzt = null, abstand0 = null;
+  fl.addEventListener('pointerdown', e => { fl.setPointerCapture(e.pointerId); zeiger.set(e.pointerId, [e.clientX, e.clientY]); letzt = [e.clientX, e.clientY]; abstand0 = null; });
+  fl.addEventListener('pointerup', e => { zeiger.delete(e.pointerId); letzt = null; abstand0 = null; });
+  fl.addEventListener('pointercancel', e => { zeiger.delete(e.pointerId); letzt = null; });
+  fl.addEventListener('contextmenu', e => e.preventDefault());
+  fl.addEventListener('pointermove', e => {
+    if (!zeiger.has(e.pointerId)) return;
+    zeiger.set(e.pointerId, [e.clientX, e.clientY]);
+    if (zeiger.size === 2) {                                   // zwei Finger: zoomen
+      const [a, b] = [...zeiger.values()], d = Math.hypot(a[0] - b[0], a[1] - b[1]);
+      if (abstand0) zoom(d / abstand0); abstand0 = d; return;
+    }
+    if (!letzt) return;
+    const dx = e.clientX - letzt[0], dy = e.clientY - letzt[1]; letzt = [e.clientX, e.clientY];
+    K.ganz = false;
+    if (K.modus === '2d') {
+      K.folgen = false; $('k-folgen').classList.remove('aktiv');
+      K.cx -= dx / K.s; K.cy += dy / K.s;
+    } else if (e.shiftKey || e.buttons === 2) {
+      const c = Math.cos(K.cam.yaw), s = Math.sin(K.cam.yaw), f = K.cam.dist / 600;
+      K.cam.tx += (s * dx - c * dy) * f; K.cam.ty += (-c * dx - s * dy) * f;
+      K.folgen = false; $('k-folgen').classList.remove('aktiv');
+    } else {
+      K.cam.yaw -= dx * 0.008; K.cam.pitch = Math.max(0.08, Math.min(1.5, K.cam.pitch + dy * 0.006));
+    }
+    karteNeuZeichnen = true;
+  });
+  fl.addEventListener('wheel', e => { e.preventDefault(); zoom(e.deltaY < 0 ? 1.15 : 1 / 1.15); }, { passive: false });
+  function zoom(f) {
+    K.ganz = false;
+    if (K.modus === '2d') K.s = Math.max(20, Math.min(1500, K.s * f)); else K.cam.dist = Math.max(0.3, Math.min(30, K.cam.dist / f));
+    karteNeuZeichnen = true;
+  }
+})();
+function karteZeichnen() {
+  if (karteNeuZeichnen && sichtbar($('w-karte'))) {
+    karteNeuZeichnen = false;
+    if (K.modus === '2d') zeichne2D(); else zeichne3D();
+  }
+  requestAnimationFrame(karteZeichnen);
+}
+requestAnimationFrame(karteZeichnen);
+function zeigeKarteInfo() {
+  const k = S.karte, info = K.info;
+  let t = S.kartograf ? '' : 'Kartograf läuft nicht · ';
+  if (k) t += `${k.status} · Fahrt ${k.fahrten}` + (k.guete ? ` · Übereinstimmung ${Math.round(k.guete * 100)} %` : '');
+  else if (S.kartograf) t += 'Kartograf startet ...';
+  if (info && info.punkte_3d) t += ` · ${info.punkte_3d.toLocaleString('de-DE')} 3D-Punkte`;
+  $('k-info').textContent = t || 'keine Karte';
+  $('k-prozess').textContent = S.kartograf ? 'Kartograf stoppen' : 'Kartograf starten';
+  karteNeuZeichnen = true;
+}
+
+// ================= ARM =================
+const LERN_POSEN = [
+  ['fahrstellung', 'Fahrstellung', 'Kamera schaut auf die Linie. Damit fährt der Roboter.'],
+  ['pruefblick', 'Prüfblick', 'KI schaut bei unklarer LiDAR-Meldung genauer hin.'],
+  ['blick_links', 'Blick links', 'Zebrastreifen/Karte: nach links schauen (ohne eigene Pose: Fahrstellung um 45° gedreht).'],
+  ['blick_rechts', 'Blick rechts', 'Zebrastreifen/Karte: nach rechts schauen.'],
+  ['greifen', 'Greifen', 'Arm unten vor dem Roboter, Greifer um den Gegenstand.'],
+  ['greifen_hoch', 'Greifen hoch', 'Gegenstand angehoben (Greifer zu).'],
+  ['ablegen', 'Ablegen', 'Seitlich neben der Straße, dort wird losgelassen.'],
+];
 let servosGebaut = false;
 function baueServos(arm) {
   const box = $('servos'); box.innerHTML = '';
-  // Startwerte (werden NICHT gesendet): zuletzt geschickt, sonst gespeicherte Fahrstellung
   const start = arm.letzte || (arm.posen && arm.posen.fahrstellung) || [90, 120, 10, 20, 90, 30];
   arm.namen.forEach((name, i) => {
     const [lo, hi] = arm.grenzen[i + 1];
@@ -460,17 +814,28 @@ function armPose(w) {
 }
 function armSpeichern(name) { if (name) aktion('arm_speichern', { name, winkel: regler() }, 'arm-antwort'); }
 function zeigePosen(posen) {
-  const box = $('posen'); const sig = JSON.stringify(posen);
+  const box = $('posen'), sig = JSON.stringify([posen, S && S.arm.gespeichert]);
   if (box.dataset.sig === sig) return; box.dataset.sig = sig; box.innerHTML = '';
   const namen = Object.keys(posen || {});
-  if (!namen.length) { box.innerHTML = '<span class="hinweis">Noch keine Posen gespeichert.</span>'; return; }
+  if (!namen.length) box.innerHTML = '<span class="hinweis">Noch keine Posen gespeichert.</span>';
   for (const n of namen) {
     const b = document.createElement('button'); b.textContent = '→ ' + n; b.onclick = () => armPose(posen[n]); box.appendChild(b);
   }
+  const lern = $('lernen'); lern.innerHTML = '';
+  const gespeichert = (S && S.arm.gespeichert) || [];
+  for (const [name, titel, text] of LERN_POSEN) {
+    const b = document.createElement('button'), da = gespeichert.includes(name), berechnet = !da && posen && posen[name];
+    b.className = da ? 'da' : 'fehlt';
+    b.innerHTML = '<b></b><small></small>';
+    b.querySelector('b').textContent = `Regler als „${titel}“ speichern` + (da ? ' ✓' : '');
+    b.querySelector('small').textContent = text + (da ? ' Gespeichert: ' + posen[name].join(', ')
+      : berechnet ? ' Jetzt berechnet: ' + posen[name].join(', ') : ' Noch nicht gespeichert.');
+    b.onclick = () => { if (!da || confirm(`„${titel}“ überschreiben?`)) armSpeichern(name); };
+    lern.appendChild(b);
+  }
 }
 
-// ---------- Status ----------
-function sinn(id, art) { $(id).className = 'sinn' + (art ? ' ' + art : '') + ($(id).classList.contains('breit') ? ' breit' : ''); }
+// ================= Status =================
 let szenarienSig = '';
 function baueSzenarien() {
   const sig = S.szenario + Object.keys(S.szenarien).join();
@@ -480,65 +845,55 @@ function baueSzenarien() {
     const b = document.createElement('button');
     b.className = k === S.szenario ? 'aktiv' : '';
     b.innerHTML = '<b></b><small></small>';
-    b.querySelector('b').textContent = v.titel; b.querySelector('small').textContent = v.text;
+    b.querySelector('b').textContent = v.titel; b.querySelector('small').textContent = v.text; b.title = v.text;
     b.onclick = () => aktion('szenario', { szenario: k });
     box.appendChild(b);
   }
 }
-function zeigeCockpit() {
+function chip(box, text, art) { const c = document.createElement('span'); c.className = 'chip' + (art ? ' ' + art : ''); c.textContent = text; box.appendChild(c); }
+const ABLAUF_NAME = { zebra: 'Zebrastreifen', wenden: 'Wenden', aufheben: 'Aufheben', umschauen: 'Umschauen' };
+function zeigeDashboard() {
   const ki = S.ki, lf = S.lf;
   // Gedanke
-  let aktionArt = 'stopp', titel = 'STOPP', grund = 'KI-Zentrale läuft nicht (System → KI-Zentrale starten)';
-  if (ki) { aktionArt = ki.aktion; titel = { fahren: 'FREI', langsam: 'LANGSAM', stopp: 'STOPP' }[ki.aktion] || ki.aktion; grund = ki.grund; }
+  let art = 'stopp', titel = 'STOPP', grund = 'KI-Zentrale läuft nicht (System → KI-Zentrale starten)';
+  if (ki) { art = ki.aktion; titel = { fahren: 'FREI', langsam: 'LANGSAM', stopp: 'STOPP', manoever: 'MANÖVER' }[ki.aktion] || ki.aktion; grund = ki.grund; }
   if (ki && !S.fahren) { titel = 'BEREIT'; grund = 'KI: ' + ki.grund + '  ·  Zum Fahren START drücken'; }
-  if (lf && ki && ki.aktion !== 'stopp' && /STOPP/.test(lf.status) ) { aktionArt = 'stopp'; grund = lf.status; }
-  $('gedanke').className = 'karte gedanke ' + aktionArt;
-  $('g-icon').innerHTML = ICON[aktionArt] || ICON.stopp;
+  if (lf && ki && ki.aktion !== 'stopp' && /STOPP/.test(lf.status)) { art = 'stopp'; grund = lf.status; }
+  $('gedanke').className = 'gedanke ' + art;
+  $('g-icon').innerHTML = ICON[art] || ICON.stopp;
   $('g-aktion').textContent = titel; $('g-grund').textContent = grund;
   const meta = [];
   if (S.fahren) meta.push(S.modus);
   if (ki) meta.push('Szenario ' + (S.szenarien[ki.szenario] || {}).titel, 'KI ' + ki.ki + (ki.ki_ms ? ` (${ki.ki_ms} ms/Bild)` : ''));
   if (lf) meta.push(`Linienfolger ${fmt(lf.fps, 0)} Bilder/s, ${fmt(Math.abs(lf.linear))} m/s`);
   $('g-meta').textContent = meta.join(' · ');
-  // Sinne
-  const lampe = ki ? ki.ampel : null;
-  document.querySelectorAll('#sn-ampel .ampel i').forEach(i => i.classList.toggle('an',
-    (lampe === 'gruen' && i.classList.contains('g')) || (lampe === 'gelb' && i.classList.contains('y')) || (lampe === 'rot' && i.classList.contains('r'))));
-  $('sn-ampel-t').textContent = lampe ? `${lampe} (${ki.ampel_quelle})` : 'keine leuchtende Ampel';
-  sinn('sn-ampel', lampe === 'rot' || lampe === 'gelb' ? 'alarm' : lampe === 'gruen' ? 'gut' : '');
-  $('sn-schild-w').textContent = ki && ki.stoppschild ? 'erkannt' : 'keins';
-  $('sn-schild-t').textContent = ki && ki.stoppschild ? ki.schild_quelle : '';
-  sinn('sn-schild', ki && ki.stoppschild ? 'alarm' : '');
-  const d = ki ? ki.lidar : null;
-  $('sn-lidar-w').textContent = d == null ? 'keine Daten' : d >= 5 ? 'frei' : Math.round(d * 100) + ' cm';
-  $('sn-lidar-b').style.width = d == null ? '0%' : Math.min(100, d / 1.0 * 100) + '%';
-  $('sn-lidar-b').style.background = d == null ? '#333' : d < 0.12 ? 'var(--rot)' : d < 0.45 ? 'var(--gelb)' : 'var(--tuerkis)';
-  sinn('sn-lidar', d == null ? 'alarm' : d < 0.12 ? 'alarm' : d < 0.45 ? 'achtung' : 'gut');
-  const t = ki ? ki.tiefe_hindernis : null;
-  $('sn-tiefe-w').textContent = !ki ? '-' : t === null ? 'lernt Boden ...' : t ? 'Hindernis!' : 'frei';
-  sinn('sn-tiefe', t ? 'alarm' : t === false ? 'gut' : '');
-  $('sn-linie-w').textContent = !lf ? 'aus' : lf.linie ? 'erkannt' : 'nicht gefunden';
-  $('sn-linie-t').textContent = lf ? `${fmt(lf.fps, 0)} Bilder/s · Lenkung ${fmt(lf.angular)}` : 'START oder TEST drücken';
-  sinn('sn-linie', !lf ? '' : lf.linie ? 'gut' : 'achtung');
-  $('sn-ki-w').textContent = ki ? (ki.ki_ms ? ki.ki_ms + ' ms' : 'läuft') : 'aus';
-  $('sn-ki-t').textContent = ki ? ki.ki : '';
-  sinn('sn-ki', ki ? 'gut' : 'alarm');
-  const box = $('sn-objekte'); box.innerHTML = '';
-  for (const o of (ki ? ki.objekte : [])) {
-    const c = document.createElement('span'); c.className = 'chip' + (o.im_weg ? ' weg' : '');
-    c.textContent = `${o.name} ${Math.round(o.sicher * 100)} %${o.farbe ? ' ' + o.farbe : ''}${o.im_weg ? ' · IM WEG' : ''}`;
-    box.appendChild(c);
+  // Wahrnehmung als Chips
+  const box = $('sinne'); box.innerHTML = '';
+  if (!ki) chip(box, 'KI aus', 'rot');
+  else {
+    if (ki.ablauf) chip(box, `${ABLAUF_NAME[ki.ablauf] || ki.ablauf}: ${ki.ablauf_phase}`, 'lila');
+    chip(box, ki.ampel ? `Ampel ${ki.ampel}` : 'keine Ampel', ki.ampel === 'rot' || ki.ampel === 'gelb' ? 'rot' : ki.ampel ? 'gruen' : 'aus');
+    if (ki.stoppschild) chip(box, 'Stoppschild', 'rot');
+    if (ki.einfahrt_verboten) chip(box, 'Einfahrt verboten', 'rot');
+    if (ki.zebra) chip(box, `Zebrastreifen ${Math.round(ki.zebra.abstand * 100)} cm`, 'gelb');
+    const d = ki.lidar;
+    chip(box, d == null ? 'LiDAR fehlt' : d >= 5 ? 'LiDAR: Weg frei' : `LiDAR: ${Math.round(d * 100)} cm im Weg`, d == null || d < 0.12 ? 'rot' : d < 0.45 ? 'gelb' : 'gruen');
+    chip(box, ki.tiefe_hindernis === null ? 'Tiefe lernt ...' : ki.tiefe_hindernis ? 'Tiefe: Hindernis' : 'Tiefe: frei', ki.tiefe_hindernis ? 'rot' : ki.tiefe_hindernis === false ? 'gruen' : 'aus');
   }
-  if (!box.children.length) box.innerHTML = '<span class="hinweis" style="margin:0">nichts erkannt</span>';
+  chip(box, !lf ? 'Linie: aus' : lf.linie ? `Linie ${lf.linie_quer != null ? fmt(lf.linie_quer * 100, 1) + ' cm' : 'ok'}` : 'Linie weg', !lf ? 'aus' : lf.linie ? 'gruen' : 'gelb');
+  const k = S.karte;
+  chip(box, k ? (k.x !== undefined ? `Karte ok (Fahrt ${k.fahrten})` : 'Karte: suche Position') : 'Karte aus', k && k.x !== undefined ? 'gruen' : 'aus');
+  const ob = $('objekte'); ob.innerHTML = '';
+  for (const o of (ki ? ki.objekte : [])) chip(ob, `${o.name} ${Math.round(o.sicher * 100)} %${o.farbe ? ' ' + o.farbe : ''}${o.im_weg ? ' · IM WEG' : ''}`, o.im_weg ? 'rot' : '');
   // Ereignisse
-  const liste = $('ereignisse'); const sig = S.ereignisse.length + (S.ereignisse[0] || {}).zeit;
-  if (liste.dataset.sig !== String(sig)) {
+  const liste = $('ereignisse'), sig = S.ereignisse.length + '/' + (S.ereignisse[0] || {}).zeit;
+  if (liste.dataset.sig !== sig) {
     liste.dataset.sig = sig; liste.innerHTML = '';
     for (const e of S.ereignisse) {
       const li = document.createElement('li'); li.className = e.art;
-      const zeit = new Date(e.zeit * 1000).toLocaleTimeString('de-DE');
       li.innerHTML = '<span class="punkt"></span><time></time><span></span>';
-      li.querySelector('time').textContent = zeit; li.lastChild.textContent = e.text;
+      li.querySelector('time').textContent = new Date(e.zeit * 1000).toLocaleTimeString('de-DE');
+      li.lastChild.textContent = e.text;
       liste.appendChild(li);
     }
     if (!S.ereignisse.length) liste.innerHTML = '<li>noch nichts</li>';
@@ -567,11 +922,14 @@ function zeigeSensoren() {
     const z = tr.insertCell(); z.textContent = x.ok === null ? 'Info' : x.ok ? 'OK' : 'FEHLT';
     z.className = x.ok === null ? '' : x.ok ? 'ok' : 'schlecht';
   }
+  const pt = $('programmtabelle'); pt.innerHTML = '';
+  for (const [name, an] of [['KI-Zentrale', !!S.ki], ['Linienfolger', S.fahren], ['Kartograf', S.kartograf]]) {
+    const tr = pt.insertRow(); tr.insertCell().textContent = name;
+    const z = tr.insertCell(); z.textContent = an ? 'läuft' : 'aus'; z.className = an ? 'ok' : '';
+  }
 }
 function zeigeSystem() {
-  const box = $('adressen');
-  const urls = S.ips.map(ip => `http://${ip}:${S.port}`);
-  const sig = urls.join();
+  const box = $('adressen'), urls = S.ips.map(ip => `http://${ip}:${S.port}`), sig = urls.join();
   if (box.dataset.sig !== sig) {
     box.dataset.sig = sig;
     box.innerHTML = urls.length ? '' : 'Keine Netzwerkadresse gefunden (WLAN/LAN verbunden?)';
@@ -584,7 +942,8 @@ async function status() {
     S = await (await fetch('/api/status')).json();
     baueSzenarien(); zeigeKopf();
     if (document.activeElement !== $('tempo')) { $('tempo').value = S.tempo; $('tempo-wert').textContent = fmt(S.tempo) + ' m/s'; }
-    if (seite === 'cockpit') zeigeCockpit();
+    if (seite === 'dashboard') zeigeDashboard();
+    if (sichtbar($('w-karte'))) zeigeKarteInfo();
     if (seite === 'sensoren') zeigeSensoren();
     if (seite === 'system') zeigeSystem();
     if (seite === 'arm') {
@@ -593,9 +952,11 @@ async function status() {
     }
   } catch (e) {
     $('g-aktion').textContent = 'KEINE VERBINDUNG'; $('g-grund').textContent = 'Panel-Programm läuft nicht';
-    $('gedanke').className = 'karte gedanke stopp';
+    $('gedanke').className = 'gedanke stopp';
   }
 }
+let gemerkt = null; try { gemerkt = localStorage.getItem('seite'); } catch (e) {}
+if (gemerkt && $('s-' + gemerkt)) zeigeSeite(gemerkt);
 setInterval(status, 400); status();
 </script>
 </body>

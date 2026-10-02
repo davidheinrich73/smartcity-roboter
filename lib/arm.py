@@ -15,7 +15,11 @@ GREIFER_ZU, GREIFER_AUF = 30, 180
 NAMEN = ['Servo 1 (Drehen unten)', 'Servo 2 (Schulter)', 'Servo 3 (Ellbogen)',
          'Servo 4 (Handgelenk kippen)', 'Servo 5 (Handgelenk drehen)', 'Servo 6 (Greifer)']
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-POSEN_DATEI = os.environ.get('SMARTCITY_ARM_YAML', os.path.join(REPO, 'config', 'arm.yaml'))
+# Standard-Posen (im Repository) und eigene, im Panel gespeicherte Posen (NICHT im Repository,
+# damit "git pull" nie an gespeicherten Werten scheitert). Eigene Werte gelten vor Standardwerten.
+STANDARD_DATEI = os.path.join(REPO, 'config', 'arm.yaml')
+POSEN_DATEI = os.environ.get('SMARTCITY_ARM_YAML', os.path.join(REPO, 'config', 'lokal', 'arm.yaml'))
+BLICK_DREHUNG = 45   # Grad, um die Servo 1 zum Umschauen gedreht wird (blick_links/blick_rechts)
 
 
 def pruefe(winkel, zeit_ms):
@@ -31,36 +35,55 @@ def pruefe(winkel, zeit_ms):
     return None
 
 
-def lade_posen():
-    """Gespeicherte Posen aus config/arm.yaml: {name: [6 Winkel]} (fehlende = None)."""
+def _lies(datei):
     try:
         import yaml
-        with open(POSEN_DATEI) as f:
-            daten = yaml.safe_load(f) or {}
-        return {k: v for k, v in (daten.get('posen') or {}).items()}
-    except FileNotFoundError:
-        return {}
-
-
-def lade_einstellungen():
-    try:
-        import yaml
-        with open(POSEN_DATEI) as f:
+        with open(datei) as f:
             return yaml.safe_load(f) or {}
     except FileNotFoundError:
         return {}
 
 
-def speichere_pose(name, winkel):
+def lade_einstellungen():
+    """Standard (config/arm.yaml) + eigene Werte (config/lokal/arm.yaml)."""
+    daten = _lies(STANDARD_DATEI)
+    eigene = _lies(POSEN_DATEI)
+    posen = dict(daten.get('posen') or {})
+    posen.update(eigene.get('posen') or {})
+    daten.update(eigene)
+    daten['posen'] = posen
+    return daten
+
+
+def lade_posen():
+    """Alle Posen: {name: [6 Winkel]}. Fehlen blick_links/blick_rechts, werden sie aus der
+    Fahrstellung berechnet (Servo 1 um BLICK_DREHUNG Grad gedreht)."""
+    posen = {k: v for k, v in (lade_einstellungen().get('posen') or {}).items()}
+    fahr = posen.get('fahrstellung')
+    if fahr:
+        for name, d in (('blick_links', BLICK_DREHUNG), ('blick_rechts', -BLICK_DREHUNG)):
+            if not posen.get(name):
+                posen[name] = [max(0, min(180, fahr[0] + d))] + list(fahr[1:])
+    return posen
+
+
+def _speichere(aenderung):
     import yaml
-    daten = lade_einstellungen()
-    daten.setdefault('posen', {})[name] = [int(w) for w in winkel]
-    daten.setdefault('ki_darf_arm_bewegen', False)
+    eigene = _lies(POSEN_DATEI)
+    aenderung(eigene)
+    os.makedirs(os.path.dirname(POSEN_DATEI), exist_ok=True)
     with open(POSEN_DATEI, 'w') as f:
-        f.write('# Arm-Posen (Grad je Servo 1-6). Gespeichert ueber das Panel (Seite Arm).\n'
-                '# ki_darf_arm_bewegen: true = KI darf bei unklarer LiDAR-Meldung im STAND\n'
-                '# kurz in "pruefblick" schauen und danach zurueck in "fahrstellung".\n')
-        yaml.safe_dump(daten, f, allow_unicode=True, sort_keys=False)
+        f.write('# Eigene Arm-Posen dieses Roboters (gespeichert ueber das Panel, Seite Arm).\n'
+                '# Nicht im Repository. Standardwerte: config/arm.yaml\n')
+        yaml.safe_dump(eigene, f, allow_unicode=True, sort_keys=False)
+
+
+def speichere_pose(name, winkel):
+    _speichere(lambda d: d.setdefault('posen', {}).__setitem__(name, [int(w) for w in winkel]))
+
+
+def speichere_einstellung(name, wert):
+    _speichere(lambda d: d.__setitem__(name, wert))
 
 
 class Arm:
@@ -98,3 +121,48 @@ class Arm:
         self.pub.publish(msg)
         self.letzte = winkel
         return None
+
+
+class ArmBeobachter:
+    """Hoert mit, wohin der Arm zuletzt geschickt wurde - egal von wem (KI, Panel, Gamepad).
+    Damit wissen KI und Kartograf, wohin die Kamera (am Arm) gerade schaut."""
+
+    def __init__(self, node):
+        self.winkel, self.zeit, self.dauer = None, 0.0, 0.0
+        from std_msgs.msg import String
+        try:
+            from rosidl_runtime_py.utilities import get_message
+            typ = get_message('arm_msgs/msg/ArmJoints')
+            node.create_subscription(typ, '/arm6_joints', self._echt, 10)
+        except Exception:
+            pass   # kein arm_msgs (Simulation)
+        node.create_subscription(String, '/arm6_joints_sim', self._sim, 10)
+
+    def _neu(self, winkel, dauer_ms):
+        import time
+        self.winkel, self.zeit, self.dauer = [float(w) for w in winkel], time.time(), float(dauer_ms) / 1000.0
+
+    def _echt(self, m):
+        self._neu([m.joint1, m.joint2, m.joint3, m.joint4, m.joint5, m.joint6], m.time)
+
+    def _sim(self, m):
+        import re
+        t = re.match(r'\[([^\]]*)\]\s*(\d+)?', m.data)
+        if t:
+            self._neu([float(w) for w in t.group(1).split(',')], int(t.group(2) or 1000))
+
+    def kamera(self, posen, jetzt):
+        """(in_fahrstellung, gier_grad). gier_grad = Drehung von Servo 1 gegenueber der Fahrstellung,
+        None = Kamera schaut irgendwohin (Arm bewegt sich oder andere Servos verstellt).
+        Ohne Meldung seit dem Start: Fahrstellung angenommen (so startet der Roboter)."""
+        fahr = posen.get('fahrstellung')
+        if self.winkel is None or not fahr:
+            return True, 0.0
+        if jetzt - self.zeit < self.dauer + 0.3:
+            return False, None                       # Arm faehrt noch
+        gleich = [abs(self.winkel[i] - fahr[i]) <= 3 for i in range(5)]   # Greifer (6) egal
+        if all(gleich):
+            return True, 0.0
+        if all(gleich[1:]):
+            return False, self.winkel[0] - fahr[0]
+        return False, None

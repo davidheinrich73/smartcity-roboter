@@ -23,6 +23,7 @@ class Args:
     port = 8099
     netz = False
     tiefe_topic = '/camera/depth/image_raw'
+    karte = 'demo'      # Karte aus karten/demo (falls vorhanden, z. B. von scripts/simulation.sh)
 
 
 node = panel.PanelNode(Args())

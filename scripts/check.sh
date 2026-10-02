@@ -12,6 +12,6 @@ echo "===== AKKU =======";   timeout 5 ros2 topic echo /battery --once 2>/dev/nu
 echo "===== LIDAR ======";   for t in /scan0 /scan1; do echo -n "$t: "; timeout 4 ros2 topic hz $t 2>/dev/null | grep -m1 average || echo "keine Daten"; done
 echo "===== KAMERA =====";   ros2 topic list | grep -i image || echo "Kamera nicht gestartet (scripts/kamera.sh)"
 echo "===== CMD_VEL ====";   ros2 topic info /cmd_vel
-echo "===== UNSERE PROGRAMME ====="; for n in ki_zentrale line_follower control_panel; do
+echo "===== UNSERE PROGRAMME ====="; for n in ki_zentrale line_follower kartograf control_panel; do
     ros2 node list 2>/dev/null | grep -q "/$n$" && echo "$n: laeuft" || echo "$n: aus"; done
 echo "ROS-Uebertragung: ${RMW_IMPLEMENTATION:-Standard (Fast DDS)}, Profil: ${FASTRTPS_DEFAULT_PROFILES_FILE:-keins}"

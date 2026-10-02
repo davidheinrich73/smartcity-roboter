@@ -8,7 +8,8 @@
 #                  + Farbe der gefundenen Ampel (welche Lampe leuchtet)
 #                  + Ersatz: LED-Erkennung und Achteck-Form, falls die KI die kleinen
 #                    Modell-Ampeln/Schilder nicht als solche erkennt
-#   LiDAR       -> Abstand nach vorne
+#   LiDAR       -> naechster Gegenstand im FAHRSCHLAUCH (Streifen entlang der Linie vor dem Roboter,
+#                  kommt vom Linienfolger; ohne Linie: geradeaus). Haeuser neben Kurven stoeren so nicht.
 #   Tiefenkamera-> ragt etwas aus dem Boden?
 # Die Entscheidung trifft ki/entscheider.py.
 #
@@ -16,8 +17,11 @@
 #   /ki/befehl              std_msgs/String  JSON {aktion, faktor, grund, ...}  (10x pro Sekunde)
 #   /ki/ereignis            std_msgs/String  JSON {zeit, text, art}
 #   /ki/bild/compressed     Kamerabild mit allem, was die KI sieht (fuer das Panel)
+#   /ki/antwort             std_msgs/String  Antwort auf /ki/kommando
 # Empfaengt:
 #   /ki/szenario            std_msgs/String  'normal' | 'einsatz'
+#   /ki/kommando            std_msgs/String  'umschauen' (Kartograf/Panel: kurz anhalten, links/rechts schauen)
+#   /arm6_joints            wohin der Arm geschickt wurde (von wem auch immer) -> wohin schaut die Kamera?
 import json
 import os
 import signal
@@ -30,7 +34,8 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data, QoSProfile, ReliabilityPolicy, HistoryPolicy
-from sensor_msgs.msg import Image, CompressedImage, LaserScan
+from sensor_msgs.msg import Image, CompressedImage, LaserScan, Imu
+from geometry_msgs.msg import Twist
 from std_msgs.msg import String
 from cv_bridge import CvBridge
 
@@ -39,6 +44,8 @@ for _d in ('lib', 'line_follower', 'erkennung', 'ki'):
     sys.path.insert(0, os.path.join(REPO, _d))
 import ampel          # noqa: E402
 import schilder       # noqa: E402
+import linie          # noqa: E402
+from zebra import finde_zebra  # noqa: E402
 import lidar          # noqa: E402
 import arm as armlib  # noqa: E402
 from tiefe import Bodenmodell        # noqa: E402
@@ -89,14 +96,23 @@ class Zentrale(Node):
         dp('scan_front_deg', [0.0, 0.0])
         dp('obstacle_half_deg', 30.0)
         dp('obstacle_min_range', 0.08)
+        dp('fahrschlauch_breite', 0.30)  # Roboterbreite + etwas Rand (m) - am Roboter nachmessen
+        dp('fahrschlauch_laenge', 0.80)  # so weit voraus pruefen (m)
         dp('szenario', 'normal')
+        for name in ('kamera_hoehe', 'kamera_neigung', 'kamera_fov', 'kamera_x', 'threshold'):
+            dp(name, linie.STANDARD[name])   # gleiche Kameradaten wie der Linienfolger (config/roboter.yaml)
 
         einst = armlib.lade_einstellungen()
-        self.posen = armlib.lade_posen()
-        arm_erlaubt = bool(einst.get('ki_darf_arm_bewegen')) and all(
-            self.posen.get(n) for n in ('fahrstellung', 'pruefblick'))
-        self.entscheider = Entscheider(arm_erlaubt=arm_erlaubt)
+        self.posen = {k: v for k, v in armlib.lade_posen().items() if v}
+        arm_erlaubt = bool(einst.get('ki_darf_arm_bewegen')) and bool(self.posen.get('fahrstellung'))
+        self.entscheider = Entscheider(arm_erlaubt=arm_erlaubt, posen=self.posen)
         self.arm = armlib.Arm(self) if arm_erlaubt else None
+        self.arm_beobachter = armlib.ArmBeobachter(self)
+        self.kamera_cfg = {n: self.p(n) for n in ('kamera_hoehe', 'kamera_neigung', 'kamera_fov', 'kamera_x', 'threshold')}
+        self.linien_sucher = linie.LinienSucher(self.kamera_cfg)   # Draufsicht fuer den Zebrastreifen
+        self.gier, self.gier_zeit, self.imu_zeit = 0.0, time.time(), 0.0
+        self.linie_status = {}
+        self.lidar_d, self.lidar_xy = None, None
 
         self.bridge = CvBridge()
         self.lock = threading.Lock()
@@ -108,7 +124,7 @@ class Zentrale(Node):
         self.befehl = {'aktion': 'stopp', 'faktor': 0.0, 'grund': 'KI startet ...', 'arm': None}
         self.ki_ms = 0.0
         self.szenario = self.p('szenario')
-        self.boden = Bodenmodell()
+        self.boden = Bodenmodell(self.kamera_cfg)
         self.ampel_werte = lade_ampel_werte()
 
         self.yolo, self.yolo_fehler = None, ''
@@ -132,6 +148,11 @@ class Zentrale(Node):
             self.create_subscription(LaserScan, t, lambda m, t=t, i=i: self._scan(m, t, i),
                                      qos_profile_sensor_data)
         self.create_subscription(String, '/ki/szenario', self._szenario, 10)
+        self.create_subscription(String, '/ki/kommando', self._kommando, 10)
+        self.pub_antwort = self.create_publisher(String, '/ki/antwort', 10)
+        self.create_subscription(Imu, '/imu/data_raw', self._imu, qos_profile_sensor_data)
+        self.create_subscription(Twist, '/cmd_vel', self._cmd, 10)
+        self.create_subscription(String, '/line_follower/status', self._linie, 10)
         self.pub_befehl = self.create_publisher(String, '/ki/befehl', 10)
         self.pub_ereignis = self.create_publisher(String, '/ki/ereignis', 50)
         self.pub_bild = self.create_publisher(CompressedImage, '/ki/bild/compressed', 1)
@@ -155,21 +176,78 @@ class Zentrale(Node):
 
     def _scan(self, msg, topic, i):
         fronts = self.p('scan_front_deg')
-        d = lidar.naechster_vorne(msg, fronts[i] if i < len(fronts) else 0.0,
-                                  self.p('obstacle_half_deg'), self.p('obstacle_min_range'))
+        front = fronts[i] if i < len(fronts) else 0.0
+        xy = lidar.punkte_xy(msg, front, self.p('obstacle_min_range'))
+        breit = lidar.naechster_vorne(msg, front, 60.0, self.p('obstacle_min_range'))   # fuer Zebrastreifen
         with self.lock:
-            self.scans[topic] = (time.time(), d)
+            self.scans[topic] = (time.time(), xy, breit)
+
+    def _imu(self, msg):
+        # Drehung um die Hochachse aufsummieren (fuer das Wenden)
+        jetzt = time.time()
+        dt = min(0.1, jetzt - self.imu_zeit) if self.imu_zeit else 0.0
+        self.imu_zeit = jetzt
+        self.gier += msg.angular_velocity.z * dt
+
+    def _cmd(self, msg):
+        # Ersatz, falls kein Lagesensor (IMU) Daten liefert: befohlene Drehung aufsummieren
+        jetzt = time.time()
+        dt = min(0.1, jetzt - self.gier_zeit)
+        self.gier_zeit = jetzt
+        if jetzt - self.imu_zeit > 1.0:
+            self.gier += msg.angular.z * dt
+
+    def _linie(self, msg):
+        try:
+            st = json.loads(msg.data)
+            st['_zeit'] = time.time()
+            self.linie_status = st
+        except ValueError:
+            pass
 
     def _szenario(self, msg):
         if msg.data in ('normal', 'einsatz') and msg.data != self.szenario:
             self.szenario = msg.data
             self._sende_ereignis(time.time(), f'Szenario: {msg.data}', 'info')
 
-    def lidar_abstand(self):
+    def _kommando(self, msg):
+        antwort = self.entscheider.kommando(time.time(), msg.data.strip())
+        self.get_logger().info(f'Kommando {msg.data}: {antwort}')
+        self.pub_antwort.publish(String(data=antwort))
+
+    def kamera_lage(self):
+        """(ok, gier): ok = Kamera schaut normal nach vorne (Draufsicht, Linie, Tiefe stimmen),
+        gier = Drehung (Grad) des Arms gegenueber der Fahrstellung oder None (unbekannt / Arm faehrt)."""
+        fahr, gier = self.arm_beobachter.kamera(self.posen, time.time())
+        ok = fahr and self.entscheider.arm_in_fahrstellung
+        return ok, (0.0 if ok else gier)
+
+    def weg_voraus(self):
+        """Linie vor dem Roboter vom Linienfolger (fuer den Fahrschlauch) oder None = geradeaus."""
+        st = self.linie_status
+        if time.time() - st.get('_zeit', 0.0) < 0.5 and st.get('weg'):
+            return st['weg']
+        return None
+
+    def lidar_pruefen(self):
+        """(Abstand im Fahrschlauch: m, inf = frei, None = keine LiDAR-Daten; Objekt oder None;
+        Abstand im breiten Bereich vorne fuer den Zebrastreifen)."""
         jetzt = time.time()
         with self.lock:
-            frisch = [d for z, d in self.scans.values() if jetzt - z < 1.0]
-        return min(frisch) if frisch else None
+            frisch = [(xy, b) for z, xy, b in self.scans.values() if jetzt - z < 1.0]
+        if not frisch:
+            return None, None, None
+        self.lidar_xy = np.vstack([xy for xy, _ in frisch])   # alle Punkte (fuer den Zebrastreifen)
+        weg = self.weg_voraus()
+        objekte = [lidar.fahrschlauch(xy, weg, self.p('fahrschlauch_breite') / 2, self.p('fahrschlauch_laenge'),
+                                      nah_halb_deg=self.p('obstacle_half_deg')) for xy, _ in frisch]
+        objekte = [o for o in objekte if o]
+        breit = min(b for _, b in frisch)
+        if not objekte:
+            return float('inf'), None, breit
+        o = dict(min(objekte, key=lambda o: o['abstand']))
+        o['quelle'] = 'lidar'
+        return o['abstand'], o, breit
 
     # ---------------- Kamera auswerten (eigener Thread) ----------------
     def _ki_schleife(self):
@@ -217,19 +295,28 @@ class Zentrale(Node):
         form = None
         if not schild and self.p('form_ersatz'):
             form = schilder.finde_stoppschild(img, {})
-            if form['treffer'] is not None:
+            # erst halten, wenn das Schild nah ist (gleiche Regel wie bei der KI: Mindesthoehe im Bild)
+            if form['treffer'] is not None and form['treffer'][3] / h >= self.p('schild_min_hoehe'):
                 schild, schild_quelle = True, 'Form-Erkennung (Achteck)'
 
-        tiefe_hindernis = None
-        # Waehrend des Arm-Blicks schaut die Tiefenkamera aus einem anderen Winkel: Das gelernte
-        # Bodenbild passt dann nicht -> Tiefenkamera nicht werten (nur die Kamera-KI zaehlt).
-        if tmsg is not None and self.entscheider.arm_phase is None:
+        # Kameramodell (Draufsicht, Tiefenkamera) stimmt nur, wenn der Arm in Fahrstellung steht
+        fahrstellung = self.kamera_lage()[0]
+        einfahrt = schilder.finde_einfahrt_verboten(img) if fahrstellung else None
+        zebra, vogel = None, None
+        if fahrstellung:
+            vogel = self.linien_sucher.suche(img).get('vogel')
+            zebra = finde_zebra(vogel, self.linien_sucher.RASTER, self.linien_sucher.VORNE[1])
+
+        tiefe_hindernis, tiefe_obj = None, None
+        if tmsg is not None and fahrstellung:
             d = self.bridge.imgmsg_to_cv2(tmsg, 'passthrough').astype(np.float32)
             if tmsg.encoding != '32FC1':
                 d /= 1000.0  # Millimeter -> Meter
-            lid = self.lidar_abstand()
-            frei = lid is None or lid >= self.entscheider.c['pruef_dist']
-            tiefe_hindernis, _ = self.boden.pruefe(d, lernen=frei)
+            lid = self.lidar_d
+            frei = (lid is None or lid >= self.entscheider.c['pruef_dist']) and self.entscheider.ablauf is None
+            tiefe_hindernis, tiefe_obj = self.boden.pruefe(d, lernen=frei, linie_voraus=self.weg_voraus())
+            if tiefe_obj:
+                tiefe_obj['quelle'] = 'tiefe'
 
         self.ki_ms = (time.time() - t0) * 1000
         with self.lock:
@@ -237,8 +324,10 @@ class Zentrale(Node):
             self.wahrnehmung = {'bild_nr': nr, 'bild_zeit': time.time(), 'objekte': objekte,
                                 'ampel': ampel_farbe, 'ampel_quelle': ampel_quelle,
                                 'stoppschild': schild, 'schild_quelle': schild_quelle,
-                                'tiefe_hindernis': tiefe_hindernis}
+                                'tiefe_hindernis': tiefe_hindernis, 'tiefe_objekt': tiefe_obj,
+                                'zebra': zebra, 'einfahrt_verboten': einfahrt is not None}
             befehl = dict(self.befehl)
+        self.letzte_extras = {'einfahrt': einfahrt, 'zebra': zebra, 'tiefe': tiefe_obj}
         self._bild_senden(msg, img, objekte, led, form, ampel_farbe, ampel_quelle, schild, befehl)
 
     def _bild_senden(self, msg, img, objekte, led, form, ampel_farbe, ampel_quelle, schild, befehl):
@@ -257,6 +346,18 @@ class Zentrale(Node):
             cv2.circle(view, (x + bw // 2, y + bh // 2), max(bw, bh) + 6, FARBE_BGR[led['farbe']], 3)
         if form and form['treffer'] is not None:
             schilder.zeichne(view, form)
+        extras = getattr(self, 'letzte_extras', {})
+        if extras.get('einfahrt'):
+            x, y, bw, bh = extras['einfahrt']
+            cv2.rectangle(view, (x, y), (x + bw, y + bh), (255, 255, 255), 3)
+            cv2.putText(view, 'EINFAHRT VERBOTEN', (x, max(14, y - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
+        if extras.get('zebra'):
+            cv2.putText(view, f"ZEBRASTREIFEN {extras['zebra']['abstand'] * 100:.0f} cm", (10, h - 40),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+        if extras.get('tiefe'):
+            o = extras['tiefe']
+            cv2.putText(view, f"HINDERNIS (Tiefe) {o['vor'] * 100:.0f} cm, {o['breite'] * 100:.0f} cm breit, "
+                              f"{o['hoehe'] * 100:.0f} cm hoch", (10, h - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 2)
         # Kopfzeile: Entscheidung
         farbe = AKTION_BGR.get(befehl['aktion'], (80, 80, 80))
         cv2.rectangle(view, (0, 0), (w, 34), farbe, -1)
@@ -273,17 +374,28 @@ class Zentrale(Node):
         jetzt = time.time()
         with self.lock:
             w = dict(self.wahrnehmung)
-        w['lidar'] = self.lidar_abstand()
+        w['lidar'], lid_obj, w['lidar_breit'] = self.lidar_pruefen()
+        self.lidar_d = w['lidar']
+        w['lidar_xy'] = self.lidar_xy if w['lidar'] is not None else None
+        w['gier'] = self.gier
+        st = self.linie_status
+        # Faehrt das Fahrprogramm wirklich? Nur dann darf die KI den Arm bewegen (nicht im TEST, nicht nach STOPP)
+        self.entscheider.fahrt_aktiv = bool(st.get('drive')) and jetzt - st.get('_zeit', 0.0) < 1.0
+        w['linie'] = {'kamera': bool(st.get('linie_kamera')), 'quer': st.get('linie_quer'), 'kurs': st.get('linie_kurs'),
+                      'kamera_quer': st.get('kamera_quer'), 'kamera_kurs': st.get('kamera_kurs')}
+        # Hindernis fuer Aufheben/Anhalten: Tiefenkamera (sieht auch Flaches), sonst LiDAR
+        if lid_obj and lid_obj['abstand'] >= self.entscheider.c['pruef_dist']:
+            lid_obj = None
+        w['objekt'] = w.get('tiefe_objekt') or lid_obj
         befehl = self.entscheider.update(jetzt, w, self.szenario)
         if befehl['arm'] and self.arm is not None:
-            fehler = self.arm.fahre(self.posen[befehl['arm']], 1200)
-            if fehler:
-                self.get_logger().error(f'Arm: {fehler}')
+            self._arm_befehl(befehl['arm'])
         with self.lock:
             self.befehl = befehl
         for zeit, text, art in self.entscheider.ereignisse:
             self._sende_ereignis(zeit, text, art)
         self.entscheider.ereignisse.clear()
+        kamera_ok, kamera_gier = self.kamera_lage()
         info = dict(befehl)
         info.update({
             'zeit': jetzt, 'szenario': self.szenario,
@@ -296,8 +408,30 @@ class Zentrale(Node):
             'objekte': [{'name': o['name'], 'sicher': o['sicher'], 'im_weg': o.get('im_weg', False),
                          'farbe': o.get('farbe')} for o in w['objekte']],
             'arm_erlaubt': self.arm is not None,
+            'zebra': w.get('zebra'), 'einfahrt_verboten': w.get('einfahrt_verboten', False),
+            'kamera_ok': kamera_ok, 'kamera_gier': kamera_gier,   # Linienfolger/Kartograf: wohin schaut die Kamera?
+            'objekt': w.get('objekt'), 'weg': self.weg_voraus(), 'fahrschlauch': self.p('fahrschlauch_breite'),
+            'ablauf': self.entscheider.ablauf.name if self.entscheider.ablauf else None,
+            'ablauf_phase': self.entscheider.ablauf.phase if self.entscheider.ablauf else None,
         })
         self.pub_befehl.publish(String(data=json.dumps(info)))
+
+    def _arm_befehl(self, arm):
+        """arm: Posenname oder {'pose': Name, 'greifer': 'auf' | 'zu' | None}."""
+        if isinstance(arm, str):
+            arm = {'pose': arm}
+        winkel = self.posen.get(arm['pose'])
+        if not winkel:
+            self.get_logger().error(f"Arm: Pose '{arm['pose']}' fehlt (im Panel einlernen)")
+            return
+        winkel = list(winkel)
+        if arm.get('greifer') == 'auf':
+            winkel[5] = armlib.GREIFER_AUF
+        elif arm.get('greifer') == 'zu':
+            winkel[5] = armlib.GREIFER_ZU
+        fehler = self.arm.fahre(winkel, 1200)
+        if fehler:
+            self.get_logger().error(f'Arm: {fehler}')
 
     def _sende_ereignis(self, zeit, text, art):
         self.get_logger().info(text)

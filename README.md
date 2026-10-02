@@ -1,7 +1,13 @@
 # SmartCity 2026 – Roboter / Autonomes Fahren
 
 Code für die Yahboom ROSMASTER M3 Pro (Jetson Orin, ROS 2 Humble, Domain-ID 30).
-Der Roboter folgt der **schwarzen Linie**. Eine **KI-Zentrale** behält Kamera, LiDAR und Tiefenkamera im Blick und entscheidet: fahren, langsam oder stopp (rote Ampel, Stoppschild, Hindernis, Person …). Dazu: Greifarm-Steuerung, LiDAR-Karte, Simulation ohne Roboter.
+Der Roboter folgt der **schwarzen Linie**, auch in engen Kurven. Eine **KI-Zentrale** behält Kamera, LiDAR und Tiefenkamera im Blick und entscheidet:
+- fahren, langsam oder stopp, z. B. bei roter Ampel, Stoppschild, Person oder Hindernis,
+- am Zebrastreifen anhalten und sich umschauen,
+- vor einer Einbahnstraße wenden,
+- kleine Hindernisse mit dem Arm aufheben und beiseitelegen.
+
+Ein **Kartograf** baut bei jeder Fahrt eine 2D- und 3D-Karte. Mit jeder Fahrt wird sie genauer. Alles ist im **Dashboard** zu sehen. Dazu gibt es eine Simulation ohne Roboter.
 
 ## Einmalig auf jedem Roboter
 
@@ -16,18 +22,22 @@ scripts/browser_installieren.sh
 - `installieren.sh` **am Roboter-Bildschirm** ausführen, nicht über SSH. Es legt **SmartCity Panel** ins Programm-Menü und (nach Rückfrage) ins **Dock** und fragt nach dem Roboter-Namen (RM01–RM04). Außerdem bietet es an, onnxruntime für die KI zu installieren. An Yahboom-Dateien und am Autostart ändert es nichts.
 - `browser_installieren.sh`: Chromium startet auf dem Jetson nicht (bekanntes Problem, siehe `docs/browser.md`). Empfohlen ist Punkt 1, das eigene Panel-Fenster ohne Browser.
 
+**Neue Version holen:** `scripts/update.sh` (oder Panel → System → "Neueste Version holen"). Eigene Einstellungen (Arm-Posen, LiDAR-Winkel) liegen in `config/lokal/` und bleiben erhalten. Das Skript übernimmt auch Einstellungen, die ältere Panel-Versionen direkt in `config/arm.yaml`/`config/roboter.yaml` geschrieben haben. Vorher legt es eine Sicherung an.
+
 ## Benutzen: Klick auf "SmartCity Panel" im Dock
 
-Startet Kamera, KI-Zentrale und das Control-Panel. **Panel-Fenster schließen = Roboter hält an, alles wird beendet.**
+Startet Kamera, KI-Zentrale, Kartograf und das Control-Panel. **Panel-Fenster schließen = Roboter hält an, alles wird beendet.**
 
 | Seite | Inhalt |
 |---|---|
-| Cockpit | **Was der Roboter gerade denkt** (FREI / LANGSAM / STOPP + Grund), Live-Bild (KI-Sicht, Linie, LiDAR-Radar, Tiefe), Szenario, Tempo-Regler, **START / TEST / STOPP**, alle Sinne auf einen Blick, Ereignis-Protokoll |
-| Arm | 6 Servos per Regler, Greifer auf/zu, Posen speichern (Fahrstellung, Prüfblick), KI-Freigabe |
-| Sensoren | Akku (Volt + geschätzte Prozent), Agent, Motorboard, IMU, Odometrie, beide LiDARs, Kamera, Gamepad mit Hz |
-| System | **IP-Adresse für den Laptop**, Laptop-Zugriff an/aus, Kamera/KI starten, Update, Panel beenden |
+| **Dashboard** | Alles auf einen Blick (passt auf 1024×600): was die KI gerade denkt, **Karte** (2D/3D umschaltbar), **Kamera** (KI-Sicht/Linie/Tiefe), **LiDAR** mit Fahrschlauch, **START / TEST / STOPP**, Szenario, Tempo, Wahrnehmung, Ereignisse |
+| Karte | Karte groß: verschieben, zoomen, in 3D drehen, Umschauen, Speichern, Neue Karte, Export als PNG und PLY (3D) |
+| Kamera / LiDAR | dieselben Ansichten groß, LiDAR-Ausrichtung einstellen |
+| Arm | 6 Servos per Regler, Greifer auf/zu, **Posen einlernen** (Fahrstellung, Prüfblick, Blick links/rechts, Greifen, Greifen hoch, Ablegen), KI-Freigabe |
+| Sensoren | Akku, Agent, Motorboard, IMU, Odometrie, LiDARs, Kamera, Gamepad, unsere Programme |
+| System | **IP-Adresse für den Laptop**, Laptop-Zugriff an/aus, Programme starten/stoppen, Update, Panel beenden |
 
-Der rote **STOPP**-Knopf oben ist auf jeder Seite sichtbar. Not-Aus von außen: `scripts/stopp.sh`.
+Der rote **STOPP**-Knopf oben ist auf jeder Seite sichtbar. Not-Aus von außen: `scripts/stopp.sh`. Nach STOPP (und im TEST) bewegt die KI den Arm nie.
 
 **Vom Laptop:** Im Panel unter System "Laptop-Zugriff erlauben", dann die angezeigte Adresse öffnen (z. B. `http://10.0.12.62:8080`). Die IP wird jedes Mal neu ermittelt. Achtung: Wer die Adresse kennt, kann dann den Roboter steuern.
 
@@ -36,53 +46,39 @@ Der rote **STOPP**-Knopf oben ist auf jeder Seite sichtbar. Not-Aus von außen: 
 ## Wer entscheidet was?
 
 ```
-Kamera, LiDAR, Tiefenkamera ──► KI-Zentrale (ki/) ──► fahren / langsam / stopp ──► Linienfolger ──► Motoren
-                                       └──► Arm (nur wenn freigegeben, nur im Stand)
+Kamera, LiDAR, Tiefenkamera ──► KI-Zentrale (ki/) ──► fahren / langsam / stopp / Manöver ──► Linienfolger ──► Motoren
+                                       └──► Arm (nur wenn freigegeben, nur im Stand, nur während der Fahrt)
+LiDAR, Odometrie, IMU, Kamera, Tiefe, KI ──► Kartograf (kartograf/) ──► Karte (karten/<name>/) ──► Panel
 ```
 
 | # | Situation | Entscheidung |
 |---|---|---|
 | 1 | LiDAR: etwas näher als 12 cm | STOPP sofort, ohne KI-Prüfung (Eigenschutz) |
 | 2 | kein LiDAR / keine Kamerabilder / KI antwortet nicht | STOPP |
-| 3 | LiDAR: etwas zwischen 12 und 45 cm | KI prüft mit Kamera-KI und Tiefenkamera: bestätigt → STOPP, sonst LANGSAM |
-| 4 | Kamera-KI sieht Person/Auto/… im Weg | STOPP |
-| 5 | Ampel rot/gelb | STOPP bis grün |
-| 6 | Stoppschild | 3 s halten, dann weiter |
-| 7 | keine Linie | STOPP |
+| 3 | LiDAR: etwas **im Fahrschlauch** (Streifen entlang der Linie), näher als 45 cm | KI prüft mit Kamera-KI und Tiefenkamera: bestätigt → STOPP (oder **aufheben**), sonst LANGSAM, ab 20 cm STOPP |
+| 4 | Tiefenkamera: etwas Flaches auf der Fahrbahn (unter der LiDAR-Ebene, z. B. Holzwürfel) | STOPP oder **aufheben und beiseitelegen** |
+| 5 | Kamera-KI sieht Person/Auto/… im Weg | STOPP |
+| 6 | Schild "Einfahrt verboten" (Einbahnstraße) | **wenden** |
+| 7 | Zebrastreifen | anhalten, **nach links und rechts schauen**, erst weiter, wenn niemand kommt |
+| 8 | Ampel rot/gelb | STOPP bis grün |
+| 9 | Stoppschild | 3 s halten, dann weiter |
+| 10 | keine Linie | kurz suchen (drehen), dann STOPP |
 
-Szenario **RTW-Einsatz**: 5 und 6 werden übergangen, alles andere gilt weiter. Details: `docs/ki.md`.
+Szenario **RTW-Einsatz**: 8 und 9 werden übergangen, alles andere gilt weiter. Aufgehoben wird nur, was klein ist, mitten auf der Straße liegt, kein Lebewesen/Fahrzeug ist und nicht am Zebrastreifen steht. Details: `docs/ki.md`, `docs/greifarm.md`.
 
-**Noch nicht eingebaut:** Abbiegen an Kreuzungen (zufällig durchs Straßennetz), Gegenstände mit dem Arm aufsammeln, Navigation auf der Karte.
+**Noch nicht eingebaut:** Abbiegen an Kreuzungen (zufällig durchs Straßennetz), Navigation auf der Karte ("fahr zu Ort X").
 
-## Einstellen
+## Einstellen (Reihenfolge)
 
 | Was | Wie |
 |---|---|
-| LiDAR "vorne" | **Zuerst machen!** Panel → Cockpit → LiDAR-Radar. Gegenstand vor die Kamera-Seite stellen, mit den Pfeilen drehen, bis er oben erscheint, "Speichern" (`config/roboter.yaml`). |
-| Arm-Fahrstellung | Panel → Arm, vorsichtig einstellen, "als Fahrstellung speichern" (`config/arm.yaml`) |
-| Ampel-LEDs | `scripts/ampel_kalibrieren.sh`: Schieberegler, Lupe, `s` = Foto, `w` = Werte in `config/ampel.yaml` |
+| 1. LiDAR "vorne" | Panel → LiDAR. Gegenstand vor die Kamera-Seite stellen, mit den Pfeilen drehen, bis er oben erscheint, "Speichern". |
+| 2. Arm-Posen | Panel → Arm. Zuerst **Fahrstellung**, dann Prüfblick, Blick links/rechts, Greifen, Greifen hoch, Ablegen (siehe `docs/greifarm.md`). Danach KI neu starten. |
+| 3. Kamera nachmessen | Höhe, Neigung und Abstand der Kamera in Fahrstellung messen und in `config/lokal/roboter.yaml` eintragen (`docs/linie.md`). Die Neigung ist am wichtigsten. |
+| 4. Ampel-LEDs | `scripts/ampel_kalibrieren.sh`: Schieberegler, Lupe, `s` = Foto, `w` = Werte in `config/ampel.yaml` |
 | Tempo | Regler im Panel (0,05–0,4 m/s, Standard 0,15) |
-| Linie | `scripts/test.sh -p threshold:=60` usw. |
 
-Wichtige Einstellungen des Linienfolgers (`-p name:=wert` oder `ros2 param set /line_follower name wert`):
-
-| Name | Standard | Bedeutung |
-|---|---|---|
-| `speed` | 0.15 | m/s (vorher 0.08) |
-| `steer_gain` | 0.004 | Lenkstärke. Lenkt falsch herum → Vorzeichen umdrehen |
-| `threshold` | 70 | dunkler als das = Linie |
-| `strip_start` | 0.75 | Linie nur im unteren Viertel suchen |
-| `notbremse_dist` | 0.12 | eigene Notbremse (m), unabhängig von der KI |
-| `obstacle_check` | true | Notbremse an/aus (RM03 hat kein LiDAR → `false`) |
-| `ki_pflicht` | true | ohne KI-Zentrale nicht fahren |
-
-## Warum fuhr der Roboter so langsam und ruckelig?
-
-1. Tempo war 0,08 m/s. Jetzt 0,15 m/s, im Panel einstellbar.
-2. Das Motorboard stoppt die Motoren 0,3 s nach dem letzten Fahrbefehl. Der alte Linienfolger schickte nur nach jedem verarbeiteten Kamerabild einen Befehl. Jetzt geht der Befehl 20× pro Sekunde raus.
-3. Große Kamerabilder kamen in ROS 2 nur stockend an. In der Simulation waren es 1 statt 15 Bilder/s, weil der Shared-Memory-Bereich von Fast DDS (512 KB) kleiner ist als ein Bild (900 KB). `config/fastdds.xml` vergrößert ihn, `scripts/env.sh` setzt ihn für alle unsere Programme. Danach kamen 15 von 15 Bildern an. Auf dem Roboter noch nicht gemessen. Das Panel zeigt "Linienfolger … Bilder/s" an.
-
-Die Kamera war auf dem Laptop stark verzögert, weil das Panel einen Videostrom geschickt hat, der sich im WLAN aufstaut. Jetzt wird jedes Bild erst geholt, wenn das vorige da ist.
+Eigene Werte gehören nach `config/lokal/` (nicht im Repository), die Standardwerte stehen in `config/roboter.yaml` und `config/arm.yaml`.
 
 ## Ohne Panel (einzelne Fenster)
 
@@ -90,6 +86,7 @@ Die Kamera war auf dem Laptop stark verzögert, weil das Panel einen Videostrom 
 |---|---|
 | `scripts/kamera.sh` | Kamera starten, offen lassen |
 | `scripts/ki.sh` | KI-Zentrale |
+| `scripts/kartograf.sh` | Kartograf (baut die Karte, fährt nicht) |
 | `scripts/test.sh` | Linienfolger im Testmodus: zeigt die Linie, **fährt nicht** |
 | `scripts/fahren.sh` | Fährt los (KI-Zentrale muss laufen). **Strg+C = Not-Aus** |
 | `scripts/stopp.sh` | Not-Aus von außen |
@@ -102,43 +99,48 @@ Die Kamera war auf dem Laptop stark verzögert, weil das Panel einen Videostrom 
 
 ```bash
 scripts/simulation.sh           # Simulator + Panel, im Browser http://localhost:8080, START drücken
-scripts/simulation.sh pruefen   # fährt eine Runde und prüft alles automatisch
+scripts/simulation.sh pruefen   # fährt gut 2 Minuten und prüft alles automatisch
 ```
 
-Ein simulierter Roboter fährt einen Rundkurs: rote Ampel (wird nach 3 s Stand grün), Stoppschild, Hindernis auf der Fahrbahn (geht nach 3 s weg) und ein Haus am Rand, das nur der LiDAR sieht. Die Simulation nutzt Domain-ID 77, nie die 30 der Roboter.
+Die Simulation enthält einen Rundkurs mit engen Kurven, eine Ampel (wird nach 3 s Stand grün) und einen Zebrastreifen mit Fußgänger. Außerdem gibt es einen Holzwürfel auf der Fahrbahn, ein Stoppschild, eine Einbahnstraße und Häuser. Simuliert werden Kamera, Tiefenkamera, beide LiDARs, Odometrie (mit Fehlern), IMU und der Arm (Greifen).
+`pruefen` prüft unter anderem:
+- Linie auf ±4 cm,
+- nicht über Rot, am Zebrastreifen gewartet,
+- Würfel gegriffen und neben die Straße gelegt,
+- am Stoppschild gehalten, gewendet statt in die Einbahnstraße,
+- Kartenposition genauer als 10 cm.
 
-## Karte (LiDAR)
+Letzter Lauf: alles bestanden (Normal und RTW-Einsatz). Linie max. 2,5 cm, Kartenposition im Mittel 1,5 cm, max. 5,3 cm. Die Simulation nutzt Domain-ID 77, nie die 30 der Roboter, und eine eigene Karte "sim".
 
-| Fenster | Befehl |
-|---|---|
-| 1 | `scripts/karte_erstellen.sh` (sucht selbst die Yahboom-Startdatei: `slam_mapping` oder `m3_bringup`) |
-| 2 | `scripts/karte_anzeigen.sh` (eigene RViz-Ansicht, oder `... yahboom`) |
-| – | Mit Gamepad **langsam** alle Straßen abfahren |
-| 3 | `scripts/karte_speichern.sh smartcity` |
+## Karte
 
-Hochladen: `git add maps && git commit -m "Karte smartcity" && git push`
-Laden und anzeigen: `scripts/karte_laden.sh smartcity`
-Klappt etwas nicht: `scripts/karte_diagnose.sh > diagnose.txt` (einmal ohne, einmal während `karte_erstellen.sh` läuft) und die Datei weitergeben.
+Der Kartograf läuft automatisch mit der KI. Mehr dazu in `docs/karte.md`.
+- Die Karte liegt in `karten/smartcity/`, nicht im Repository.
+- Beim nächsten Start sucht der Roboter seine Position selbst in der vorhandenen Karte.
+- Export im Panel: PNG (2D) und PLY (3D, öffnen z. B. mit MeshLab oder CloudCompare).
 
-**Alle Karten-Skripte sind noch UNGETESTET auf dem Roboter.**
+Die älteren Skripte `karte_erstellen.sh` usw. (Yahboom/slam_toolbox, mit Gamepad abfahren) gibt es weiterhin. Sie sind noch ungetestet.
 
 ## Tests
 
 ```bash
 python3 tests/test_ampel.py          # Ampel-LEDs (3 Farben), rote Gegenstände
 python3 tests/test_schilder.py       # Stoppschild-Form
-python3 tests/test_entscheider.py    # Entscheidungen der KI
+python3 tests/test_entscheider.py    # Entscheidungen der KI (Zebrastreifen, Wenden, Aufheben, Sicherheitsregeln ...)
 python3 tests/test_line_follower.py  # wann der Linienfolger fährt
+python3 tests/test_karte.py          # Karte + Wiederfinden + Tiefenkamera (mit der Simulationswelt, ca. 20 s)
 scripts/simulation.sh pruefen        # alles zusammen (braucht ROS 2)
 ```
 
-## Bekannte Probleme
+## Bekannte Probleme / ungeprüft
 
+- **Alles Neue ist nur in der Simulation getestet, nicht auf dem echten Roboter.** Dazu gehören Zebrastreifen, Einbahnstraße, Aufheben, Karte und Dashboard.
+- Kameramaße (Höhe 22 cm, Neigung 32°) sind geschätzt. Bitte nachmessen, sonst wird die Linie ungenauer (`docs/linie.md`).
+- Richtung von Servo 1 (Blick links/rechts) ist ungeprüft. Zeigt "Blick links" nach rechts, die Posen im Panel neu einlernen.
+- Ob `/odom_raw` Geschwindigkeiten liefert, ist ungeprüft. Ohne Odometrie rechnet der Kartograf nur mit IMU und LiDAR.
 - Alle Roboter heißen `yahboom` → nur einen gleichzeitig einschalten (Domain-ID 30 für alle).
-- Waagrechte schwarze Flächen (Kreuzungen, Kabel) verwirren den Linienfolger.
 - RM03: ein Rad schwächer, Board liefert keine Sensordaten → "Kein LiDAR", fährt nicht los.
 - Gamepad und Fahrprogramm senden beide auf `/cmd_vel` → nicht gleichzeitig benutzen.
 - Desktop-Symbol meldet "Untrusted Desktop File" trotz Markierung → Dock benutzen.
-- Der LiDAR sieht nur eine dünne waagrechte Scheibe: Ein Schuh ist im Radar nur ein kurzer Bogen.
 
-Siehe auch `docs/ki.md`, `docs/greifarm.md`, `docs/browser.md`, `docs/roboter.md`.
+Siehe auch `docs/ki.md`, `docs/linie.md`, `docs/karte.md`, `docs/greifarm.md`, `docs/browser.md`, `docs/roboter.md`.

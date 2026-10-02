@@ -1,62 +1,107 @@
 #!/usr/bin/env python3
-# Tiefenkamera: Ragt etwas aus dem Boden vor dem Roboter?
+# Tiefenkamera: Ragt etwas aus dem Boden vor dem Roboter? Wo genau, wie breit, wie hoch?
 #
-# Die Kamera schaut schraeg auf die Strasse. Sie misst also immer den Boden in
-# einem bestimmten Abstand. Deshalb lernt dieses Modul, wie der Boden "normal"
-# aussieht (Abstand je Bildbereich), solange der LiDAR vorne nichts meldet.
-# Ist ein Bereich spaeter deutlich NAEHER als gelernt, steht dort etwas.
-# UNGETESTET mit der echten Kamera.
+# Fuer jeden Bildpunkt wird mit dem Kameramodell (Hoehe, Neigung, Blickwinkel) ausgerechnet,
+# wo er im Raum liegt: x vorne, y links, z = Hoehe ueber dem Boden. Boden = 0 cm.
+# Was mehr als 'min_hoehe' herausragt und im Fahrweg liegt, ist ein Hindernis -
+# auch Dinge UNTER der LiDAR-Ebene (z. B. ein kleiner Holzwuerfel).
+# Fahrweg = Streifen entlang der Linie vor dem Roboter (wie beim LiDAR-Fahrschlauch), in Kurven also
+# gebogen. Ohne bekannte Linie: gerade nach vorne.
+#
+# Kameradaten sind nie ganz genau. Darum lernt das Modell, solange der Weg frei ist, fuer jede
+# Bildzeile, wie hoch der Boden "scheinbar" liegt, und zieht das spaeter ab.
+# UNGETESTET mit der echten Kamera. Annahme: Tiefenbild ist auf das Farbbild ausgerichtet
+# (gleicher Blickwinkel), Werte in Millimetern (16UC1) oder Metern (32FC1).
+import math
+
 import numpy as np
+
+from lidar import abstand_zum_weg
+
+STANDARD = {
+    'min_hoehe': 0.02,       # hoeher als das ueber dem Boden = Hindernis (m)
+    'weg_breite': 0.14,      # Fahrweg: +- so viel seitlich (m)
+    'weg_laenge': 0.60,      # Fahrweg: bis so weit voraus (m)
+    'min_punkte': 25,        # so viele Bildpunkte muessen herausragen (gegen Rauschen)
+    'lern_bilder': 5,        # so viele freie Bilder, bis die Bodenkorrektur gilt
+}
 
 
 class Bodenmodell:
-    def __init__(self, spalten=8, zeilen=6, links=0.25, rechts=0.75, oben=0.3,
-                 differenz=0.06, min_zellen=2, lern_bilder=10, lernrate=0.1):
-        self.spalten, self.zeilen = spalten, zeilen
-        self.links, self.rechts, self.oben = links, rechts, oben
-        self.differenz = differenz        # so viel naeher als der Boden (m) = Hindernis
-        self.min_zellen = min_zellen      # so viele Bereiche muessen naeher sein
-        self.lern_bilder = lern_bilder    # erst danach ist das Modell bereit
-        self.lernrate = lernrate
-        self.boden = None
+    def __init__(self, kamera, cfg=None, breite=160):
+        """kamera: dict mit kamera_hoehe, kamera_neigung, kamera_fov, kamera_x (wie linie.STANDARD)."""
+        self.k = kamera
+        self.c = dict(STANDARD)
+        self.c.update(cfg or {})
+        self.breite = breite           # Tiefenbild wird auf diese Breite verkleinert (schneller)
+        self.strahlen = None
+        self.korrektur = None          # gelernte Bodenhoehe je Bildzeile
         self.gelernt = 0
 
-    def _zellen(self, tiefe_m):
-        """Median-Abstand je Zelle im Fahrweg (unterer, mittlerer Bildteil). 0 = keine Messung."""
-        h, w = tiefe_m.shape
-        y0, x0, x1 = int(h * self.oben), int(w * self.links), int(w * self.rechts)
-        teil = tiefe_m[y0:, x0:x1]
-        th, tw = teil.shape
-        werte = np.zeros((self.zeilen, self.spalten), np.float32)
-        for zi in range(self.zeilen):
-            for si in range(self.spalten):
-                z = teil[zi * th // self.zeilen:(zi + 1) * th // self.zeilen,
-                         si * tw // self.spalten:(si + 1) * tw // self.spalten]
-                gueltig = z[z > 0.05]
-                if gueltig.size > z.size * 0.3:
-                    werte[zi, si] = np.median(gueltig)
-        return werte
+    def _vorbereiten(self, h, w):
+        if self.strahlen is not None and self.strahlen[0].shape == (h, w):
+            return
+        k = self.k
+        f = (w / 2) / math.tan(math.radians(k['kamera_fov']) / 2)
+        u, v = np.meshgrid(np.arange(w) - w / 2 + 0.5, np.arange(h) - h / 2 + 0.5)
+        du, dv = u / f, v / f
+        p = math.radians(k['kamera_neigung'])
+        # Punkt = Kamera + Tiefe * (rx, ry, rz)
+        self.strahlen = (math.cos(p) - dv * math.sin(p), -du, -math.sin(p) - dv * math.cos(p))
+        self.korrektur = np.zeros(h)
 
-    def pruefe(self, tiefe_m, lernen):
-        """tiefe_m: Tiefenbild in Metern (0 = keine Messung).
-        lernen: True, wenn der Weg frei ist (LiDAR meldet nichts) -> Boden merken.
-        Rueckgabe: (hindernis True/False oder None = noch nicht bereit, naechster Abstand in m oder None)
-        """
-        z = self._zellen(tiefe_m)
-        if self.boden is None:
-            self.boden = z.copy()
-        bereit = self.gelernt >= self.lern_bilder
-        hindernis, naechster = None, None
-        if bereit:
-            beide = (z > 0) & (self.boden > 0)
-            naeher = beide & (z < self.boden - self.differenz)
-            hindernis = int(naeher.sum()) >= self.min_zellen
-            if hindernis:
-                naechster = float(z[naeher].min())
-        if lernen and not hindernis:
-            neu = (self.boden == 0) & (z > 0)
-            self.boden[neu] = z[neu]
-            beide = (self.boden > 0) & (z > 0)
-            self.boden[beide] += self.lernrate * (z[beide] - self.boden[beide])
+    def punkte(self, tiefe_m):
+        """Tiefenbild (m) -> x, y, z je Bildpunkt (verkleinert). 0 = keine Messung -> nan."""
+        h0, w0 = tiefe_m.shape
+        schritt = max(1, w0 // self.breite)
+        t = tiefe_m[::schritt, ::schritt].astype(np.float32)
+        t = np.where(t > 0.03, t, np.nan)
+        self._vorbereiten(*t.shape)
+        rx, ry, rz = self.strahlen
+        x = self.k['kamera_x'] + t * rx
+        y = t * ry
+        z = self.k['kamera_hoehe'] + t * rz
+        return x, y, z
+
+    def pruefe(self, tiefe_m, lernen, linie_voraus=None):
+        """Rueckgabe: (hindernis True/False oder None = noch nicht bereit, objekt-dict oder None).
+        objekt: vor (m, naechster Punkt), seite (m, Mitte), breite (m), hoehe (m), punkte (Anzahl),
+                quer (m, Abstand zur Linie; nur mit linie_voraus).
+        linie_voraus: Linie vor dem Roboter [(x, y), ...] (vom Linienfolger) -> Fahrweg folgt ihr."""
+        x, y, z = self.punkte(tiefe_m)
+        weg = (x > 0.05) & (x < self.c['weg_laenge']) & (np.abs(y) < self.c['weg_breite'])
+        if lernen:
+            # Bodenkorrektur je Zeile: Median der Hoehe der Bodenpunkte im Fahrweg
+            for zeile in range(z.shape[0]):
+                werte = z[zeile][weg[zeile]]
+                werte = werte[np.isfinite(werte)]
+                if len(werte) > 5:
+                    self.korrektur[zeile] += 0.3 * (np.median(werte) - self.korrektur[zeile])
             self.gelernt += 1
-        return hindernis, naechster
+        if self.gelernt < self.c['lern_bilder']:
+            return None, None
+        hoch = (z - self.korrektur[:, None]) > self.c['min_hoehe']
+        quer_karte = None
+        if linie_voraus:
+            # Fahrweg entlang der Linie: nur die herausragenden Punkte pruefen (wenige, schnell)
+            kand = hoch & np.isfinite(z) & (x > 0.05) & (np.hypot(x, y) < self.c['weg_laenge'] + 0.1)
+            weg = np.zeros_like(kand)
+            quer_karte = np.full(kand.shape, np.nan)
+            if kand.any():
+                quer, entlang = abstand_zum_weg(np.column_stack([x[kand], y[kand]]), linie_voraus,
+                                                self.c['weg_laenge'])
+                weg[kand] = (quer < self.c['weg_breite']) & (entlang < self.c['weg_laenge'])
+                quer_karte[kand] = quer
+        treffer = weg & hoch & np.isfinite(z)
+        n = int(treffer.sum())
+        if n < self.c['min_punkte']:
+            return False, None
+        xs, ys, zs = x[treffer], y[treffer], z[treffer] - self.korrektur[np.nonzero(treffer)[0]]
+        naechster = float(np.percentile(xs, 5))
+        vorne = xs < naechster + 0.05          # nur die Vorderseite fuer Lage und Breite
+        objekt = {'vor': naechster, 'seite': float(np.median(ys[vorne])),
+                  'breite': float(np.percentile(ys[vorne], 95) - np.percentile(ys[vorne], 5)),
+                  'hoehe': float(np.percentile(zs, 95)), 'punkte': n}
+        if quer_karte is not None:   # wie weit neben der Linie (Mitte des Fahrwegs) liegt es?
+            objekt['quer'] = float(np.median(quer_karte[treffer][vorne]))
+        return True, objekt

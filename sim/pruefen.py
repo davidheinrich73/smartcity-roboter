@@ -2,48 +2,63 @@
 # Startet Simulator + KI-Zentrale + Linienfolger (faehrt nur im Simulator) und prueft,
 # ob sich der simulierte Roboter richtig verhaelt.
 # Aufruf: scripts/simulation.sh pruefen     (setzt eine eigene ROS_DOMAIN_ID, NICHT 30)
+#   SIM_DAUER=150        so viele Sekunden fahren
+#   SIM_SZENARIO=einsatz RTW-Einsatz (ueber Rot, Stoppschild auslassen)
+#   SIM_KARTE_ORDNER=... Kartenordner (Standard: neu in den Logs). Zweimal mit demselben Ordner
+#                        starten -> prueft, ob der Roboter sich in der vorhandenen Karte wiederfindet.
 import json
+import math
 import os
 import signal
 import subprocess
 import sys
 import time
 
+import numpy as np
 import rclpy
 from std_msgs.msg import String
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, os.path.join(REPO, 'sim'))
-from simulator import AMPEL, SCHILD, HAUS  # noqa: E402
+from welt import Welt  # noqa: E402
+sys.path.insert(0, os.path.join(REPO, 'lib'))
+import karte as K      # noqa: E402
 
-DAUER = float(os.environ.get('SIM_DAUER', 80))
+DAUER = float(os.environ.get('SIM_DAUER', 150))
 SZENARIO = os.environ.get('SIM_SZENARIO', 'normal')   # normal | einsatz
+LOGS = os.environ.get('SIM_LOGS', '/tmp')
+KARTEN = os.environ.get('SIM_KARTE_ORDNER', os.path.join(LOGS, 'sim_karten'))
 
 
-def starte(befehl, name):
-    log = open(f'/tmp/sim_{name}.log', 'w')
-    return subprocess.Popen(befehl, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+def starte(befehl, name, env):
+    log = open(os.path.join(LOGS, f'sim_{name}.log'), 'w')
+    return subprocess.Popen(befehl, stdout=log, stderr=subprocess.STDOUT, start_new_session=True, env=env)
 
 
 def main():
     if os.environ.get('ROS_DOMAIN_ID', '0') == '30':
         sys.exit('ROS_DOMAIN_ID=30 ist die der Roboter! Simulation nur mit anderer Domain-ID.')
+    env = dict(os.environ)
+    env.setdefault('SMARTCITY_ARM_YAML', os.path.join(REPO, 'sim', 'arm_sim.yaml'))
     cfg = ['--params-file', os.path.join(REPO, 'config', 'roboter.yaml')]
     prozesse = [
-        starte([sys.executable, os.path.join(REPO, 'sim', 'simulator.py')], 'simulator'),
-        starte([sys.executable, os.path.join(REPO, 'ki', 'zentrale.py'), '--ros-args'] + cfg, 'ki'),
+        starte([sys.executable, os.path.join(REPO, 'sim', 'simulator.py')], 'simulator', env),
+        starte([sys.executable, os.path.join(REPO, 'ki', 'zentrale.py'), '--ros-args'] + cfg, 'ki', env),
         starte([sys.executable, os.path.join(REPO, 'line_follower', 'line_follower.py'), '--ros-args'] + cfg +
-               ['-p', 'drive:=true', '-p', 'show:=false'], 'linienfolger'),
+               ['-p', 'drive:=true', '-p', 'show:=false'], 'linienfolger', env),
+        starte([sys.executable, os.path.join(REPO, 'kartograf', 'kartograf.py'), '--ros-args'] + cfg +
+               ['-p', f'ordner:={KARTEN}'], 'kartograf', env),
     ]
     rclpy.init()
     node = rclpy.create_node('sim_pruefer')
-    zustaende, ereignisse, befehle = [], [], []
+    zustaende, ereignisse, befehle, karte = [], [], [], []
     node.create_subscription(String, '/sim/zustand', lambda m: zustaende.append(json.loads(m.data)), 50)
     node.create_subscription(String, '/ki/ereignis', lambda m: ereignisse.append(json.loads(m.data)), 50)
     node.create_subscription(String, '/ki/befehl', lambda m: befehle.append(json.loads(m.data)), 50)
+    node.create_subscription(String, '/karte/pose', lambda m: karte.append(json.loads(m.data)), 50)
     pub = node.create_publisher(String, '/ki/szenario', 10)
     node.create_timer(1.0, lambda: pub.publish(String(data=SZENARIO)))
-    print(f'Simulation laeuft {DAUER:.0f} s, Szenario {SZENARIO} ...')
+    print(f'Simulation laeuft {DAUER:.0f} s, Szenario {SZENARIO} ... (Logs: {LOGS}/sim_*.log)')
     ende = time.time() + DAUER
     try:
         while time.time() < ende:
@@ -61,10 +76,17 @@ def main():
                 os.killpg(p.pid, signal.SIGKILL)
         node.destroy_node()
         rclpy.shutdown()
+    with open(os.path.join(LOGS, 'sim_verlauf.json'), 'w') as f:   # zum Nachschauen
+        json.dump({'zustaende': zustaende, 'ereignisse': ereignisse, 'befehle': befehle[::5], 'karte': karte}, f)
+    return auswerten(zustaende, ereignisse, karte)
 
+
+def auswerten(zustaende, ereignisse, karte=()):
     if not zustaende:
-        print('FEHLER: keine Daten vom Simulator. Logs: /tmp/sim_*.log')
+        print(f'FEHLER: keine Daten vom Simulator. Logs: {LOGS}/sim_*.log')
         return 1
+    welt = Welt()
+    L = welt.laenge
     t0 = zustaende[0]['zeit']
     print('\nEreignisse der KI:')
     for e in ereignisse:
@@ -77,42 +99,132 @@ def main():
         fehler += not ok
         print(f"{'OK  ' if ok else 'FEHLER'} {name} {info}")
 
+    def vor(z, s_ziel):
+        """Wie weit (m, entlang der Strecke) liegt s_ziel vor dem Roboter? (in Fahrtrichtung vorwaerts)"""
+        return (s_ziel - z['s']) % L
+
+    # Abschnitt bis zur Einbahnstrasse (erste Runde, in Fahrtrichtung)
+    hin = []
+    for z in zustaende:
+        if z['gefahren'] > 0.3 and not z['vorwaerts']:
+            break
+        hin.append(z)
+
     print('\nPruefungen:')
-    erste = [z for z in zustaende if z['runde'] == 0]
-    gesamt = zustaende[-1]['gesamt']
+    gesamt = zustaende[-1]['gefahren']
     check('Roboter faehrt', gesamt > 2.0, f'({gesamt:.1f} m gefahren)')
-    schnell = max(z['v'] for z in zustaende)
+    fahrt = [z for z in zustaende if z['v'] > 0.05 and abs(z['quer']) < 1e-3]
+    schnell = max((z['v'] for z in zustaende), default=0)
     erwartet = (0.17, 0.25) if SZENARIO == 'einsatz' else (0.12, 0.17)
-    check('Geschwindigkeit (normal 0,15 m/s, Einsatz x1,3)', erwartet[0] <= schnell <= erwartet[1], f'(max {schnell:.2f} m/s)')
-    rot_s = [z['s'] for z in erste if z['ampel'] == 'rot']
-    am_schild = [z for z in erste if SCHILD[0] - 0.8 <= z['s'] <= SCHILD[1] and z['v'] == 0]
-    stand_schild = (am_schild[-1]['zeit'] - am_schild[0]['zeit']) if am_schild else 0
+    check('Geschwindigkeit (normal 0,15 m/s, Einsatz x1,3)', erwartet[0] <= schnell <= erwartet[1],
+          f'(max {schnell:.2f} m/s)')
+    abw = max((z['seite'] for z in fahrt), default=1.0)
+    mittel = sum(z['seite'] for z in fahrt) / max(1, len(fahrt))
+    check('genau auf der Linie (auch in Kurven)', abw < 0.04,
+          f'(groesste Abweichung {abw * 100:.1f} cm, Mittel {mittel * 100:.1f} cm)')
+    check('Linie nie verloren', abw < 0.08)
+
+    # Ampel
+    rot_vor = [vor(z, welt.ampel_s) for z in hin if z['ampel'] == 'rot']
     if SZENARIO == 'einsatz':
-        check('EINSATZ: bei Rot durchgefahren', any(z['ampel'] == 'rot' and z['v'] > 0 for z in erste)
-              and not any(z['ampel'] == 'rot' and z['v'] == 0 and z['s'] > 0.35 for z in erste))
-        check('EINSATZ: am Stoppschild nicht gehalten', stand_schild < 0.5, f'({stand_schild:.1f} s)')
+        check('EINSATZ: bei Rot durchgefahren', any(z['ampel'] == 'rot' and z['v'] > 0 for z in hin)
+              and not any(z['ampel'] == 'rot' and z['v'] == 0 and vor(z, welt.ampel_s) < 0.4 for z in hin))
+    elif rot_vor:
+        ueber = [z for z in hin if z['ampel'] == 'rot' and vor(z, welt.ampel_s) > L - 0.5]
+        check('bei Rot nicht ueber die Ampel gefahren', not ueber)
+        halt = [vor(z, welt.ampel_s) for z in hin if z['ampel'] == 'rot' and z['v'] == 0]
+        check('vor der roten Ampel angehalten', bool(halt), f'({min(halt) * 100:.0f} cm davor)' if halt else '')
+        check('bei Gruen weitergefahren', any(z['s'] > welt.ampel_s + 0.1 for z in hin))
     else:
-        check('bei Rot nicht ueber die Ampel gefahren', not rot_s or max(rot_s) < AMPEL[1],
-              f'(max s bei Rot {max(rot_s, default=0):.2f} m)')
-        check('vor der roten Ampel angehalten', any(z['ampel'] == 'rot' and z['v'] == 0 for z in erste))
-        check('bei Gruen weitergefahren', any(z['s'] > AMPEL[1] for z in erste))
-        check('am Stoppschild gehalten (ca. 3 s)', 2.0 <= stand_schild <= 6.0, f'({stand_schild:.1f} s)')
-    abstaende = [z['hindernis'] for z in erste if z['hindernis'] is not None]
-    if abstaende:
-        check('nicht ins Hindernis gefahren', min(abstaende) > 0.1, f'(naechster Abstand {min(abstaende) * 100:.0f} cm)')
-        check('vor dem Hindernis gehalten', any(z['hindernis'] is not None and z['v'] == 0 for z in erste))
+        check('Ampel erreicht', False, '(Simulation zu kurz?)')
+
+    # Zebrastreifen mit Fussgaenger
+    am_zebra = [z for z in hin if 0 < vor(z, welt.zebra_s) < 0.6]
+    if am_zebra and any(z['s'] > welt.zebra_s + 0.1 for z in hin):
+        ueber_mit = [z for z in hin if z['fussgaenger'] and welt.zebra_s - 0.15 < z['s'] < welt.zebra_s + 0.3]
+        check('nicht ueber den Zebrastreifen, solange der Fussgaenger da ist', not ueber_mit)
+        geschaut = any(z['arm'][0] > 110 for z in am_zebra) and any(z['arm'][0] < 70 for z in am_zebra)
+        check('am Zebrastreifen nach links und rechts geschaut (Arm)', geschaut)
+        check('Fussgaenger durfte gehen, dann weitergefahren',
+              not zustaende[-1]['fussgaenger'] and any(z['s'] > welt.zebra_s + 0.2 for z in hin))
     else:
-        check('Hindernis erreicht', False, '(Simulation zu kurz?)')
-    haus = [z['v'] for z in erste if HAUS[0] + 0.05 <= z['s'] <= HAUS[1] - 0.05]
-    frei = [z['v'] for z in erste if 1.2 <= z['s'] <= 1.6]
-    if haus and frei:
-        check('am Haus (nur LiDAR) langsamer, aber nicht gestoppt',
-              0 < sum(haus) / len(haus) < 0.8 * max(frei), f'(Haus {sum(haus) / len(haus):.2f} m/s, frei {max(frei):.2f} m/s)')
+        check('Zebrastreifen erreicht und ueberquert', False, '(Simulation zu kurz?)')
+
+    # Wuerfel aufheben
+    w0 = welt.pose_bei(welt.wuerfel_s)
+    nah = []
+    for z in hin:
+        if z['haelt'] or z['abgelegt']:
+            break                      # nur bis zum Greifen pruefen
+        if z['wuerfel']:
+            dx, dy = z['wuerfel'][0] - z['x'], z['wuerfel'][1] - z['y']
+            nah.append(math.cos(z['w']) * dx + math.sin(z['w']) * dy if math.hypot(dx, dy) < 0.4 else 9)
+    gegriffen = any(z['haelt'] for z in zustaende)
+    check('Wuerfel nicht angefahren', min(nah, default=9) > 0.12,
+          f'(naechster Abstand vorne {min(nah, default=9) * 100:.0f} cm)')
+    check('Wuerfel gegriffen', gegriffen)
+    abgelegt = zustaende[-1]['abgelegt']
+    if abgelegt:
+        _, seite = welt.s_von(*abgelegt)
+        check('Wuerfel neben die Strasse gelegt', seite > 0.1, f'({seite * 100:.0f} cm neben der Linie)')
+        check('nach dem Aufheben weitergefahren', any(z['s'] > welt.wuerfel_s + 0.2 for z in hin))
     else:
-        check('Haus erreicht', False, '(Simulation zu kurz?)')
-    abw = max(abs(z['e']) for z in zustaende)
-    check('Linie nicht verloren', abw < 0.9, f'(groesste Abweichung {abw:.2f})')
-    print('\nAlles in Ordnung.' if not fehler else f'\n{fehler} Pruefung(en) fehlgeschlagen. Logs: /tmp/sim_*.log')
+        check('Wuerfel abgelegt', False)
+    print(f'      (Wuerfel lag bei x={w0[0]:.2f}, y={w0[1]:.2f})')
+
+    # Stoppschild
+    am_schild = [z for z in hin if 0 < vor(z, welt.schild_s) < 0.8 and z['v'] == 0]
+    stand = (am_schild[-1]['zeit'] - am_schild[0]['zeit']) if am_schild else 0
+    if SZENARIO == 'einsatz':
+        check('EINSATZ: am Stoppschild nicht gehalten', stand < 0.5, f'({stand:.1f} s)')
+    elif any(z['s'] > welt.schild_s + 0.1 for z in hin):
+        check('am Stoppschild gehalten (ca. 3 s)', 2.0 <= stand <= 6.0, f'({stand:.1f} s)')
+    else:
+        check('Stoppschild erreicht', False, '(Simulation zu kurz?)')
+
+    # Einbahnstrasse
+    erreicht = [z for z in zustaende if 0 < vor(z, welt.einbahn_s) < 0.8 and z['vorwaerts']]
+    if erreicht:
+        hinein = [z for z in zustaende if z['vorwaerts'] and 0 < z['s'] - welt.einbahn_s < 0.4]
+        check('nicht in die Einbahnstrasse gefahren', not hinein,
+              f"(bis {max((z['s'] - welt.einbahn_s for z in hinein), default=0) * 100:.0f} cm hinein)")
+        zurueck = [z for z in zustaende if not z['vorwaerts'] and z['v'] > 0.05]
+        check('gewendet und in Gegenrichtung weitergefahren', len(zurueck) > 20)
+    else:
+        check('Einbahnstrasse erreicht', False, '(Simulation zu kurz?)')
+
+    # Kartograf: stimmt seine Position? (Karten-System = Startpunkt der ersten Fahrt = Start im Simulator)
+    start = welt.pose_bei(0.0)
+    zeiten = np.array([z['zeit'] for z in zustaende])
+    fehler_k = []
+    for k in karte:
+        if 'x' not in k:
+            continue
+        z = zustaende[int(np.argmin(np.abs(zeiten - k['zeit'])))]
+        wahr = K.relativ(start, (z['x'], z['y'], z['w']))
+        fehler_k.append((math.hypot(k['x'] - wahr[0], k['y'] - wahr[1]), abs(K.winkel(k['w'] - wahr[2]))))
+    if fehler_k:
+        f = np.array(fehler_k)
+        check('Karte: Position des Roboters stimmt', f[:, 0].max() < 0.10,
+              f'(max {f[:, 0].max() * 100:.1f} cm / {math.degrees(f[:, 1].max()):.1f} Grad, '
+              f'Mittel {f[:, 0].mean() * 100:.1f} cm, Fahrt {karte[-1].get("fahrten")}, {karte[-1].get("status")})')
+    else:
+        check('Karte: Kartograf meldet eine Position', False, f"({karte[-1]['status'] if karte else 'keine Meldung'})")
+    datei = os.path.join(KARTEN, 'smartcity', 'karte.json')
+    try:
+        with open(datei) as f:
+            info = json.load(f)
+        marker = ', '.join(f"{m['name']} ({m['anzahl']}x)" for m in info['marker'])
+        check('Karte: Dateien geschrieben (karte.png, wolke.bin, karte.json)',
+              all(os.path.exists(os.path.join(KARTEN, 'smartcity', d)) for d in ('karte.png', 'wolke.bin')),
+              f"({info['punkte_3d']} 3D-Punkte, Marker: {marker or 'keine'})")
+        arten = {m['art'] for m in info['marker']}
+        check('Karte: KI-Marker fuer Ampel, Zebrastreifen, Stoppschild', {'ampel', 'zebra', 'stoppschild'} <= arten,
+              f'({sorted(arten)})')
+    except (OSError, ValueError, KeyError) as e:
+        check('Karte: Dateien', False, f'({e})')
+
+    print('\nAlles in Ordnung.' if not fehler else f'\n{fehler} Pruefung(en) fehlgeschlagen. Logs: {LOGS}/sim_*.log')
     return 1 if fehler else 0
 
 
