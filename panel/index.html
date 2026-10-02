@@ -437,7 +437,8 @@ function zeichneRadar(d) {
 let servosGebaut = false;
 function baueServos(arm) {
   const box = $('servos'); box.innerHTML = '';
-  const start = arm.letzte || [90, 120, 0, 0, 90, 180];  // Yahboom-Grundstellung als Startwert (wird NICHT gesendet)
+  // Startwerte (werden NICHT gesendet): zuletzt geschickt, sonst gespeicherte Fahrstellung
+  const start = arm.letzte || (arm.posen && arm.posen.fahrstellung) || [90, 120, 10, 20, 90, 30];
   arm.namen.forEach((name, i) => {
     const [lo, hi] = arm.grenzen[i + 1];
     const z = document.createElement('div'); z.className = 'servo';
