@@ -15,7 +15,8 @@
 #        nicht bestaetigt -> langsam (ggf. vorher mit dem Arm genauer hinschauen),
 #                            naeher als lidar_halt -> trotzdem stopp
 #      Der LiDAR prueft nur den FAHRSCHLAUCH (Streifen entlang der Linie, siehe ki/zentrale.py).
-#      Ist es klein und kein Lebewesen/Fahrzeug und der Arm freigegeben: AUFHEBEN und beiseitelegen
+#      Ist es klein, liegt mitten auf der Strasse, kein Lebewesen/Fahrzeug, kein Zebrastreifen in der Naehe
+#      und der Arm freigegeben: AUFHEBEN und beiseitelegen
 #   4. Tiefenkamera allein sieht etwas im Weg (z. B. Wuerfel unter der LiDAR-Ebene) -> stopp
 #      bzw. aufheben (wie bei 3.)
 #      KI sieht Person/Auto/... im Weg  -> stopp
@@ -63,6 +64,8 @@ STANDARD = {
     'tiefe_halt': 0.35,        # Tiefenkamera sieht etwas im Weg naeher als das (m) -> stopp
     'aufheben_max_breite': 0.08,
     'aufheben_max_hoehe': 0.12,
+    'aufheben_max_quer': 0.08, # nur aufheben, was so nah an der Linie liegt (m) - am Rand steht vielleicht jemand
+    'zebra_kein_aufheben': 3.0,  # so lange nach einem gesehenen Zebrastreifen nichts aufheben (s): Fussgaenger!
     'ausricht_abstand': 0.30,  # so weit vor dem Gegenstand seitlich ausrichten (Kamera sieht ihn noch)
     'greif_abstand': 0.20,     # Robotermitte bis Mitte Gegenstand in der Pose 'greifen' (am Roboter messen!)
     'anfahr_tempo': 0.03,      # m/s beim letzten Stueck
@@ -370,6 +373,10 @@ class Entscheider:
             return False
         if any(o['name'] in LEBEWESEN | FAHRZEUGE for o in w.get('objekte', [])):
             return False   # Lebewesen und Fahrzeuge werden nie angefasst
+        if self.zebra_gesperrt or self.jetzt - self.zebra_zuletzt < self.c['zebra_kein_aufheben']:
+            return False   # am Zebrastreifen stehen Fussgaenger -> nichts anfassen, nur warten
+        if obj.get('quer') is not None and obj['quer'] > self.c['aufheben_max_quer']:
+            return False   # liegt am Rand, nicht mitten auf der Strasse
         return obj['breite'] <= self.c['aufheben_max_breite'] and obj.get('hoehe', 0) <= self.c['aufheben_max_hoehe']
 
     @staticmethod

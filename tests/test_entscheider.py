@@ -222,6 +222,17 @@ ok = 'geht nicht' in l.e.kommando(l.t, 'umschauen')
 fehler += not ok
 print(f"{'OK  ' if ok else 'FEHLER'} Umschauen ohne Arm-Freigabe wird abgelehnt")
 
+# ---------------- Aufheben: Sicherheitsregeln ----------------
+l = Lauf(arm_erlaubt=True, posen=POSEN)
+pruefe('Gegenstand am Strassenrand (12 cm neben der Linie) -> nicht greifen, warten',
+       l.schritt(3, objekt=dict(WUERFEL, quer=0.12)), 'stopp', None)
+l = Lauf(arm_erlaubt=True, posen=POSEN)
+l.schritt(1, zebra={'abstand': 0.6})
+b = l.schritt(2, objekt=WUERFEL)
+ok = b['aktion'] == 'stopp' and l.e.ablauf is None
+fehler += not ok
+print(f"{'OK  ' if ok else 'FEHLER'} kurz nach Zebrastreifen -> nichts aufheben (Fussgaenger!): {b['grund']}")
+
 print()
 print('Alle Tests bestanden.' if not fehler else f'{fehler} Test(s) fehlgeschlagen.')
 sys.exit(1 if fehler else 0)

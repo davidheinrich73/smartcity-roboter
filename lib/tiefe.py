@@ -65,7 +65,8 @@ class Bodenmodell:
 
     def pruefe(self, tiefe_m, lernen, linie_voraus=None):
         """Rueckgabe: (hindernis True/False oder None = noch nicht bereit, objekt-dict oder None).
-        objekt: vor (m, naechster Punkt), seite (m, Mitte), breite (m), hoehe (m), punkte (Anzahl).
+        objekt: vor (m, naechster Punkt), seite (m, Mitte), breite (m), hoehe (m), punkte (Anzahl),
+                quer (m, Abstand zur Linie; nur mit linie_voraus).
         linie_voraus: Linie vor dem Roboter [(x, y), ...] (vom Linienfolger) -> Fahrweg folgt ihr."""
         x, y, z = self.punkte(tiefe_m)
         weg = (x > 0.05) & (x < self.c['weg_laenge']) & (np.abs(y) < self.c['weg_breite'])
@@ -80,14 +81,17 @@ class Bodenmodell:
         if self.gelernt < self.c['lern_bilder']:
             return None, None
         hoch = (z - self.korrektur[:, None]) > self.c['min_hoehe']
+        quer_karte = None
         if linie_voraus:
             # Fahrweg entlang der Linie: nur die herausragenden Punkte pruefen (wenige, schnell)
             kand = hoch & np.isfinite(z) & (x > 0.05) & (np.hypot(x, y) < self.c['weg_laenge'] + 0.1)
             weg = np.zeros_like(kand)
+            quer_karte = np.full(kand.shape, np.nan)
             if kand.any():
                 quer, entlang = abstand_zum_weg(np.column_stack([x[kand], y[kand]]), linie_voraus,
                                                 self.c['weg_laenge'])
                 weg[kand] = (quer < self.c['weg_breite']) & (entlang < self.c['weg_laenge'])
+                quer_karte[kand] = quer
         treffer = weg & hoch & np.isfinite(z)
         n = int(treffer.sum())
         if n < self.c['min_punkte']:
@@ -95,6 +99,9 @@ class Bodenmodell:
         xs, ys, zs = x[treffer], y[treffer], z[treffer] - self.korrektur[np.nonzero(treffer)[0]]
         naechster = float(np.percentile(xs, 5))
         vorne = xs < naechster + 0.05          # nur die Vorderseite fuer Lage und Breite
-        return True, {'vor': naechster, 'seite': float(np.median(ys[vorne])),
-                      'breite': float(np.percentile(ys[vorne], 95) - np.percentile(ys[vorne], 5)),
-                      'hoehe': float(np.percentile(zs, 95)), 'punkte': n}
+        objekt = {'vor': naechster, 'seite': float(np.median(ys[vorne])),
+                  'breite': float(np.percentile(ys[vorne], 95) - np.percentile(ys[vorne], 5)),
+                  'hoehe': float(np.percentile(zs, 95)), 'punkte': n}
+        if quer_karte is not None:   # wie weit neben der Linie (Mitte des Fahrwegs) liegt es?
+            objekt['quer'] = float(np.median(quer_karte[treffer][vorne]))
+        return True, objekt
