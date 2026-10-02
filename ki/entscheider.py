@@ -14,9 +14,19 @@
 #        bestaetigt -> stopp, bis der Weg wieder frei ist
 #        nicht bestaetigt -> langsam (ggf. vorher mit dem Arm genauer hinschauen)
 #   4. KI sieht Person/Auto/... im Weg  -> stopp
-#   5. Ampel rot/gelb -> stopp, bis gruen (oder Ampel nicht mehr zu sehen)
-#   6. Stoppschild -> kurz halten, dann weiter
-# Im Szenario "einsatz" (RTW) werden 5 und 6 uebergangen, 1-4 gelten weiter.
+#      Tiefenkamera allein sieht etwas im Weg (z. B. Wuerfel unter der LiDAR-Ebene) -> stopp
+#      Ist es klein und kein Lebewesen/Fahrzeug und der Arm freigegeben: AUFHEBEN und beiseitelegen
+#   4. KI sieht Person/Auto/... im Weg  -> stopp
+#   5. Schild "Einfahrt verboten" (Einbahnstrasse) -> WENDEN
+#   6. Zebrastreifen -> anhalten, umschauen, warten bis frei
+#   7. Ampel rot/gelb -> stopp, bis gruen (oder Ampel nicht mehr zu sehen)
+#   8. Stoppschild -> kurz halten, dann weiter
+# Im Szenario "einsatz" (RTW) werden 7 und 8 uebergangen, alles andere gilt weiter.
+# Mehrschrittige Ablaeufe (Zebrastreifen, Wenden, Aufheben) stehen in ki/ablaeufe.py.
+
+from ablaeufe import Zebrastreifen, Wenden, Aufheben, LEBEWESEN
+
+FAHRZEUGE = {'Auto', 'Bus', 'LKW', 'Motorrad', 'Fahrrad', 'Zug'}
 
 STANDARD = {
     'notbremse_dist': 0.12,    # LiDAR naeher (m) -> sofort Stopp, ohne Rueckfrage
@@ -34,14 +44,39 @@ STANDARD = {
                                # nicht mehr zu sehen war (sonst haelt er beim Vorbeifahren nochmal)
     'umschauen_nach': 1.5,     # LiDAR-Meldung so lange unbestaetigt -> mit dem Arm genauer schauen
     'arm_zeit': 1.5,           # so lange braucht der Arm fuer eine Bewegung (s)
+    # Zebrastreifen
+    'zebra_halt': 0.33,        # Zebrastreifen naeher als das (m, ab Robotermitte) -> anhalten
+    'zebra_lidar': 0.5,        # LiDAR sieht etwas naeher als das (breiter Bereich vorne) -> jemand kommt
+    'zebra_schauen': 0.8,      # so lange in jede Richtung schauen (s), nachdem der Arm steht
+    'zebra_warten': 2.0,       # jemand da -> so lange warten, dann neu schauen (s)
+    'zebra_weg': 2.0,          # nach dem Ueberqueren: erst wieder beachten, wenn so lange nicht gesehen
+    # Einbahnstrasse
+    'einfahrt_bilder': 2,      # so viele Bilder hintereinander "Einfahrt verboten" -> wenden
+    'wenden_dreh': 0.8,        # Drehgeschwindigkeit beim Wenden (rad/s, + = links herum)
+    'wenden_max_zeit': 14.0,
+    # Hindernis aufheben (Posen 'greifen', 'greifen_hoch', 'ablegen' im Panel einlernen!)
+    'tiefe_halt': 0.35,        # Tiefenkamera sieht etwas im Weg naeher als das (m) -> stopp
+    'aufheben_max_breite': 0.08,
+    'aufheben_max_hoehe': 0.12,
+    'ausricht_abstand': 0.30,  # so weit vor dem Gegenstand seitlich ausrichten (Kamera sieht ihn noch)
+    'greif_abstand': 0.20,     # Robotermitte bis Mitte Gegenstand in der Pose 'greifen' (am Roboter messen!)
+    'anfahr_tempo': 0.03,      # m/s beim letzten Stueck
 }
+
+GREIF_POSEN = ('fahrstellung', 'greifen', 'greifen_hoch', 'ablegen')
 
 
 class Entscheider:
-    def __init__(self, cfg=None, arm_erlaubt=False):
+    def __init__(self, cfg=None, arm_erlaubt=False, posen=None):
         self.c = dict(STANDARD)
         self.c.update(cfg or {})
         self.arm_erlaubt = arm_erlaubt
+        self.posen = posen or {}
+        # Ablaeufe
+        self.ablauf = None
+        self.zebra_gesperrt, self.zebra_zuletzt = False, 0.0
+        self.einfahrt_n, self.einfahrt_gesperrt_bis = 0, 0.0
+        self.aufheben_gesperrt, self.weg_frei_seit = False, None
         self.ereignisse = []          # (zeit, text, art) art: stopp | fahren | info
         self.letzte_bild_nr = -1
         # Ampel
@@ -86,7 +121,13 @@ class Entscheider:
             self.letzte_bild_nr = w.get('bild_nr', -1)
             self._ampel_bild(jetzt, w)
             self._schild_bild(jetzt, w)
+            self.einfahrt_n = self.einfahrt_n + 1 if w.get('einfahrt_verboten') else 0
+            if w.get('zebra'):
+                self.zebra_zuletzt = jetzt
+        if self.zebra_gesperrt and self.ablauf is None and jetzt - self.zebra_zuletzt > self.c['zebra_weg']:
+            self.zebra_gesperrt = False  # ueber den Zebrastreifen drueber
         self._ampel_zeit(jetzt)
+        w = dict(w, neues_bild=neues_bild)
 
         befehl = self._entscheide(jetzt, w, einsatz)
         # Arm zuerst zurueck in Fahrstellung, bevor wieder gefahren wird
@@ -162,6 +203,25 @@ class Entscheider:
         if not ki_frisch:
             return self._b('stopp', 'KI bekommt keine Kamerabilder')
 
+        # Laufender Ablauf (Zebrastreifen, Wenden, Aufheben) hat Vorrang
+        if self.ablauf is not None:
+            b = self.ablauf.schritt(jetzt, w)
+            for text, art in self.ablauf.ereignisse:
+                self._ereignis(jetzt, text, art)
+            self.ablauf.ereignisse.clear()
+            if b is not None:
+                return self._mit_faktor(b)
+            self._ablauf_ende(jetzt)
+
+        obj = w.get('objekt')
+        tiefe_im_weg = obj is not None and obj.get('quelle') == 'tiefe' and obj['vor'] < c['tiefe_halt']
+        if obj is None and (d is None or d >= c['pruef_dist']):
+            self.weg_frei_seit = self.weg_frei_seit or jetzt
+            if jetzt - self.weg_frei_seit > 2.0:
+                self.aufheben_gesperrt = False
+        else:
+            self.weg_frei_seit = None
+
         # 3. LiDAR-Meldung pruefen
         im_pruefbereich = d is not None and d < c['pruef_dist']
         if im_pruefbereich:
@@ -179,6 +239,8 @@ class Entscheider:
                 if jetzt >= self.hindernis_bis:
                     self._ereignis(jetzt, f"Hindernis bestaetigt ({' + '.join(beweise)})", 'stopp')
                 self.hindernis_bis = jetzt + c['frei_zeit']
+                if self._aufhebbar(w):
+                    return self._ablauf_start(jetzt, Aufheben(jetzt, c, obj))
                 return self._b('stopp', f"Hindernis {d * 100:.0f} cm, bestaetigt durch {' + '.join(beweise)}")
             if jetzt < self.hindernis_bis:
                 return self._b('stopp', 'Hindernis war bestaetigt -> warte, bis der Weg frei ist')
@@ -197,12 +259,34 @@ class Entscheider:
             self.meldung_seit = None
             self.geprueft_frei = False
             self._arm_abbrechen()
+        # Tiefenkamera allein: etwas unter der LiDAR-Ebene im Weg (z. B. Holzwuerfel)
+        if tiefe_im_weg:
+            if jetzt >= self.hindernis_bis:
+                self._ereignis(jetzt, f"Tiefenkamera: Hindernis {obj['vor'] * 100:.0f} cm voraus, "
+                                      f"{obj['hoehe'] * 100:.0f} cm hoch (unter der LiDAR-Ebene)", 'stopp')
+            self.hindernis_bis = jetzt + c['frei_zeit']
+            if self._aufhebbar(w):
+                return self._ablauf_start(jetzt, Aufheben(jetzt, c, obj))
+            grund = ' (Aufheben hat nicht geklappt)' if self.aufheben_gesperrt else ''
+            return self._b('stopp', f"Hindernis {obj['vor'] * 100:.0f} cm (Tiefenkamera) -> warte{grund}")
+
         if jetzt < self.hindernis_bis:
             return self._b('stopp', 'Hindernis war bestaetigt -> warte, bis der Weg frei ist')
 
         # 4. KI sieht etwas im Weg (auch ohne LiDAR, z. B. weiter weg oder unter der LiDAR-Scheibe)
         if im_weg:
             return self._b('stopp', 'KI sieht im Weg: ' + ', '.join(im_weg))
+        # 5. Einbahnstrasse von der falschen Seite -> wenden
+        if self.einfahrt_n >= c['einfahrt_bilder'] and jetzt >= self.einfahrt_gesperrt_bis:
+            self.einfahrt_n = 0
+            self._ereignis(jetzt, 'Schild "Einfahrt verboten" (Einbahnstrasse) -> wende', 'stopp')
+            return self._ablauf_start(jetzt, Wenden(jetzt, c, w.get('gier', 0.0)))
+        # 6. Zebrastreifen -> anhalten und umschauen
+        z = w.get('zebra')
+        if z and not self.zebra_gesperrt and z['abstand'] <= c['zebra_halt']:
+            self._ereignis(jetzt, f"Zebrastreifen {z['abstand'] * 100:.0f} cm voraus -> anhalten, umschauen", 'stopp')
+            posen = self.posen if self.arm_erlaubt else {}
+            return self._ablauf_start(jetzt, Zebrastreifen(jetzt, c, posen))
         # 5./6. Verkehrsregeln
         if self.ampel_halt:
             if einsatz:
@@ -213,6 +297,47 @@ class Entscheider:
                 return self._b('fahren', 'EINSATZ: Stoppschild wird uebergangen', fahrfaktor)
             return self._b('stopp', f'Stoppschild -> halte noch {self.schild_bis - jetzt:.0f} s')
         return self._b('fahren', 'EINSATZFAHRT, Weg frei' if einsatz else 'Weg frei', fahrfaktor)
+
+    # ------------------------------------------------------------------ #
+    # Ablaeufe
+    def _ablauf_start(self, jetzt, ablauf):
+        self.ablauf = ablauf
+        b = ablauf.schritt(jetzt, {})
+        for text, art in ablauf.ereignisse:
+            self._ereignis(jetzt, text, art)
+        ablauf.ereignisse.clear()
+        return self._mit_faktor(b) if b else self._b('stopp', ablauf.name)
+
+    def _ablauf_ende(self, jetzt):
+        a = self.ablauf
+        self.ablauf = None
+        if a.arm_bewegt:
+            self.arm_zurueck_noetig = True
+        if a.name == 'zebra':
+            self.zebra_gesperrt = True
+        elif a.name == 'wenden':
+            self.einfahrt_gesperrt_bis = jetzt + 6.0
+            self.einfahrt_n = 0
+        elif a.name == 'aufheben':
+            self.hindernis_bis = 0.0
+            if a.ergebnis != 'ok':
+                self.aufheben_gesperrt = True
+
+    def _aufhebbar(self, w):
+        obj = w.get('objekt')
+        if not (self.arm_erlaubt and obj and not self.aufheben_gesperrt):
+            return False
+        if not all(self.posen.get(p) for p in GREIF_POSEN):
+            return False
+        if any(o['name'] in LEBEWESEN | FAHRZEUGE for o in w.get('objekte', [])):
+            return False   # Lebewesen und Fahrzeuge werden nie angefasst
+        return obj['breite'] <= self.c['aufheben_max_breite'] and obj.get('hoehe', 0) <= self.c['aufheben_max_hoehe']
+
+    @staticmethod
+    def _mit_faktor(b):
+        b = dict(b)
+        b.setdefault('faktor', 0.0)
+        return b
 
     # ------------------------------------------------------------------ #
     # Arm: bei unklarer LiDAR-Meldung im Stand genauer hinschauen
@@ -253,8 +378,14 @@ class Entscheider:
             self.arm_zurueck_noetig = True
         self.arm_phase = None
 
+    @property
+    def arm_in_fahrstellung(self):
+        """Fuer die Tiefenkamera: Nur in Fahrstellung stimmt das Kameramodell."""
+        return (self.arm_phase is None and not self.arm_zurueck_noetig
+                and not (self.ablauf is not None and self.ablauf.arm_bewegt))
+
     @staticmethod
     def _b(aktion, grund, faktor=None, arm=None):
         if faktor is None:
             faktor = 0.0 if aktion == 'stopp' else 1.0
-        return {'aktion': aktion, 'faktor': round(float(faktor), 2), 'grund': grund, 'arm': arm}
+        return {'aktion': aktion, 'faktor': round(float(faktor), 2), 'grund': grund, 'arm': arm, 'manoever': None}

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # Prueft die Entscheidungen der KI-Zentrale mit ausgedachten Wahrnehmungen (kein Roboter noetig).
 # Aufruf: python3 tests/test_entscheider.py
+import math
 import os
 import sys
 
@@ -100,6 +101,87 @@ pruefe('danach frei -> Arm zuerst zurueck', l.schritt(1, lidar=1.0), 'stopp', 'f
 pruefe('waehrend Arm zurueckfaehrt -> noch Stopp', l.schritt(5, lidar=1.0), 'stopp')
 pruefe('danach weiter', l.schritt(20, lidar=1.0), 'fahren')
 pruefe('ohne Erlaubnis kein Arm', Lauf().schritt(40, lidar=0.3), 'langsam', None)
+
+# ---------------- Zebrastreifen ----------------
+POSEN = {'fahrstellung': [90, 120, 10, 20, 90, 30], 'pruefblick': [90, 100, 20, 30, 90, 30],
+         'blick_links': [135, 120, 10, 20, 90, 30], 'blick_rechts': [45, 120, 10, 20, 90, 30],
+         'greifen': [90, 60, 60, 40, 90, 30], 'greifen_hoch': [90, 120, 40, 40, 90, 30],
+         'ablegen': [170, 70, 60, 40, 90, 30]}
+
+
+def arm_befehle(lauf, n, **w):
+    """n Schritte, sammelt alle Arm-Befehle."""
+    arme, letzter = [], None
+    for _ in range(n):
+        letzter = lauf.schritt(1, **w)
+        if letzter['arm']:
+            arme.append(letzter['arm']['pose'] if isinstance(letzter['arm'], dict) else letzter['arm'])
+    return arme, letzter
+
+
+l = Lauf(arm_erlaubt=True, posen=POSEN)
+pruefe('Zebrastreifen 50 cm -> noch fahren', l.schritt(2, zebra={'abstand': 0.5}), 'fahren')
+pruefe('Zebrastreifen 30 cm -> anhalten', l.schritt(1, zebra={'abstand': 0.3}), 'stopp')
+arme, b = arm_befehle(l, 80, zebra={'abstand': 0.3})
+ok = arme == ['blick_links', 'blick_rechts', 'fahrstellung']
+fehler += not ok
+print(f"{'OK  ' if ok else 'FEHLER'} umschauen links, rechts, zurueck: {arme}")
+pruefe('niemand da -> weiter', b, 'fahren')
+pruefe('derselbe Zebrastreifen -> kein zweiter Halt', l.schritt(20, zebra={'abstand': 0.2}), 'fahren')
+l = Lauf(arm_erlaubt=True, posen=POSEN)
+l.schritt(1, zebra={'abstand': 0.3})
+arme, b = arm_befehle(l, 80, zebra={'abstand': 0.3}, objekte=[{'name': 'Person', 'im_weg': False}])
+pruefe('Person gesehen -> wartet weiter', b, 'stopp')
+arme, b = arm_befehle(l, 120, zebra={'abstand': 0.3})
+pruefe('Person weg -> weiter', b, 'fahren')
+l = Lauf()
+l.schritt(1, zebra={'abstand': 0.3})
+arme, b = arm_befehle(l, 30, zebra={'abstand': 0.3}, lidar_breit=0.35)
+ok = arme == [] and b['aktion'] == 'stopp'
+fehler += not ok
+print(f"{'OK  ' if ok else 'FEHLER'} ohne Arm-Freigabe: kein Arm, etwas auf dem Zebrastreifen -> wartet ({b['grund']})")
+pruefe('ohne Arm, frei -> weiter', l.schritt(80, zebra={'abstand': 0.3}), 'fahren')
+
+# ---------------- Einbahnstrasse ----------------
+l = Lauf()
+pruefe('Einfahrt verboten 1 Bild -> noch nichts', l.schritt(1, einfahrt_verboten=True), 'fahren')
+pruefe('Einfahrt verboten 2 Bilder -> anhalten', l.schritt(1, einfahrt_verboten=True), 'stopp')
+b = l.schritt(10, gier=0.0)
+ok = b['aktion'] == 'manoever' and b['manoever']['dreh'] > 0
+fehler += not ok
+print(f"{'OK  ' if ok else 'FEHLER'} dreht auf der Stelle: {b['grund']}")
+pruefe('nach 100 Grad noch nicht fertig', l.schritt(1, gier=math.radians(100), linie={'kamera': True, 'quer': 0.0}), 'manoever')
+pruefe('160 Grad + Linie vorne -> fertig, faehrt', l.schritt(1, gier=math.radians(160), linie={'kamera': True, 'quer': 0.01}), 'fahren')
+pruefe('Schild noch sichtbar -> nicht nochmal wenden', l.schritt(5, gier=math.radians(160), einfahrt_verboten=True), 'fahren')
+
+# ---------------- Aufheben ----------------
+WUERFEL = {'vor': 0.31, 'seite': 0.02, 'breite': 0.045, 'hoehe': 0.045, 'quelle': 'tiefe'}
+l = Lauf(arm_erlaubt=True, posen=POSEN)
+b = l.schritt(1, objekt=WUERFEL)
+ok = b['aktion'] == 'manoever' and b['manoever']['quer'] > 0
+fehler += not ok
+print(f"{'OK  ' if ok else 'FEHLER'} Wuerfel (Tiefenkamera) -> richtet sich seitlich aus: {b['grund']}")
+mittig = dict(WUERFEL, seite=0.0, vor=0.30)
+b = l.schritt(4, objekt=mittig)
+pruefe('ausgerichtet -> faehrt heran', l.schritt(1, objekt=mittig), 'manoever')
+arme, b = arm_befehle(l, 200)
+soll = ['greifen', 'greifen', 'greifen_hoch', 'ablegen', 'ablegen', 'fahrstellung']
+ok = arme == soll
+fehler += not ok
+print(f"{'OK  ' if ok else 'FEHLER'} Greif-Ablauf: {arme}")
+pruefe('Weg frei -> weiter', b, 'fahren')
+l = Lauf(arm_erlaubt=True, posen=POSEN)
+l.schritt(5, objekt=mittig)
+arme, b = arm_befehle(l, 200, objekt=mittig)
+pruefe('Wuerfel liegt nach dem Greifen noch da -> wartet', b, 'stopp')
+pruefe('kein zweiter Versuch, solange er da liegt', l.schritt(10, objekt=mittig), 'stopp')
+l = Lauf(arm_erlaubt=True, posen=POSEN)
+b = l.schritt(3, objekt=WUERFEL, objekte=[{'name': 'Person', 'im_weg': False}])
+pruefe('Person in Sicht -> nie greifen, nur warten', b, 'stopp')
+l = Lauf(arm_erlaubt=True, posen=POSEN)
+pruefe('zu breit (20 cm) -> warten statt greifen', l.schritt(3, objekt=dict(WUERFEL, breite=0.2)), 'stopp')
+l = Lauf(arm_erlaubt=False, posen=POSEN)
+pruefe('ohne Arm-Freigabe -> warten', l.schritt(3, objekt=WUERFEL), 'stopp')
 
 print()
 print('Alle Tests bestanden.' if not fehler else f'{fehler} Test(s) fehlgeschlagen.')
