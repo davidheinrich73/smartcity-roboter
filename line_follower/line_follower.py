@@ -5,16 +5,22 @@
 # Testmodus (faehrt NICHT): scripts/test.sh    Fahren: scripts/fahren.sh (oder Panel)
 #
 # Wer entscheidet was?
-#   KI-Zentrale (ki/zentrale.py): ob gefahren werden darf (Ampel, Schild, Hindernis ...)
-#                                 und wie schnell (Faktor)
-#   Linienfolger (diese Datei):   wohin gelenkt wird (Linie), und eine eigene
-#                                 LiDAR-Notbremse als zweite Sicherheit
+#   KI-Zentrale (ki/zentrale.py): ob gefahren werden darf (Ampel, Schild, Hindernis ...),
+#                                 wie schnell (Faktor) und Manoever (wenden, ausrichten zum Greifen)
+#   Linienfolger (diese Datei):   wohin gelenkt wird (Linie, line_follower/linie.py),
+#                                 fuehrt Manoever aus, eigene LiDAR-Notbremse als zweite Sicherheit
+#
+# Wie er der Linie folgt (genauer in Kurven als frueher):
+#   Kamerabild -> Draufsicht -> Mittellinie in Metern -> Gedaechtnis (rechnet die eigene Bewegung mit,
+#   kennt dadurch die Linie auch direkt unter dem Roboter) -> Lenkung mit Kurvenvorsteuerung.
+#   Linie weg: dreht sich zur Seite, wo sie zuletzt war, und sucht (such_zeit), dann Stopp.
 #
 # Sicherheit:
 #   - Fahrbefehle gehen 20x pro Sekunde raus. Das Motorboard stoppt selbst, wenn
 #     0,3 s lang kein Befehl kommt (Watchdog).
 #   - Ohne Antwort der KI (ki_pflicht), ohne Kamerabilder oder ohne Linie: Stopp.
-#   - Notbremse ueber LiDAR, unabhaengig von der KI.
+#   - Notbremse ueber LiDAR, unabhaengig von der KI (blockiert vorwaerts und seitwaerts,
+#     Drehen auf der Stelle und rueckwaerts bleiben erlaubt).
 #
 # Einstellungen: -p name:=wert beim Start oder  ros2 param set /line_follower name wert
 import json
@@ -38,7 +44,12 @@ from cv_bridge import CvBridge
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, os.path.join(REPO, 'lib'))
+sys.path.insert(0, os.path.join(REPO, 'line_follower'))
 import lidar  # noqa: E402
+import linie  # noqa: E402
+
+# Grenzen fuer Manoever der KI (Sicherheit)
+MANOEVER_MAX = {'lin': 0.10, 'quer': 0.08, 'dreh': 1.2}
 
 
 class LineFollower(Node):
@@ -52,16 +63,12 @@ class LineFollower(Node):
         dp('image_topic', '/camera/color/image_raw')
         dp('rate', 20.0)            # Fahrbefehle pro Sekunde (Board-Watchdog: 0,3 s)
         dp('ki_pflicht', True)      # ohne Befehl der KI-Zentrale nicht fahren
-        # ---- Linie ----
-        dp('speed', 0.15)           # m/s (vorher 0.08 = sehr langsam)
-        dp('direction', 1.0)        # -1.0 = andersherum fahren
-        dp('steer_gain', 0.004)     # Lenkstaerke, Vorzeichen = Lenkrichtung
-        dp('max_turn', 1.0)         # maximale Drehgeschwindigkeit (rad/s)
-        dp('threshold', 70)         # dunkler als das = Linie (0 schwarz - 255 weiss)
-        dp('strip_start', 0.75)     # Linie nur ab 75 % Bildhoehe (unten) suchen
-        dp('min_area', 500)         # kleinere schwarze Flecken ignorieren
+        dp('speed', 0.15)           # m/s auf gerader Strecke (in Kurven automatisch langsamer)
+        dp('direction', 1.0)        # -1.0 = rueckwaerts fahren (Kamera schaut trotzdem nach vorne!)
+        # ---- Linie + Lenkung (Erklaerung in line_follower/linie.py) ----
+        for name, wert in linie.STANDARD.items():
+            dp(name, wert)
         # ---- LiDAR-Notbremse (zweite Sicherheit, unabhaengig von der KI) ----
-        # Welche Richtung je LiDAR "vorne" ist: config/roboter.yaml (Panel -> LiDAR)
         dp('obstacle_check', True)
         dp('scan_topics', ['/scan0', '/scan1'])
         dp('scan_front_deg', [0.0, 0.0])
@@ -71,15 +78,21 @@ class LineFollower(Node):
 
         self.bridge = CvBridge()
         self.lock = threading.Lock()
-        self.lenkung = None              # (linear, angular) aus dem letzten Bild, None = keine Linie
+        cfg = {n: self.p(n) for n in linie.STANDARD}
+        self.sucher = linie.LinienSucher(cfg)
+        self.lenkung = linie.Lenkung(cfg)
+        self.gedaechtnis = linie.Gedaechtnis()
+        self.linie_gesehen = False
         self.bild_zeit = 0.0
         self.bild_zaehler, self.fps, self.fps_zeit = 0, 0.0, time.time()
         self.scans = {}
         self.ki = (0.0, None)            # (zeit, befehl)
         self.last_image_pub = 0.0
         self.status_text = 'startet ...'
-        self.letzter_cmd = (0.0, 0.0)
+        self.letzter_cmd = (0.0, 0.0, 0.0)  # vorwaerts, seitwaerts, drehen
+        self.letzte_steuerung = time.time()
         self.anzeige = None              # (Bild, Maske) fuer die Fenster (zeigt der Haupt-Thread)
+        self.add_on_set_parameters_callback(self._parameter_geaendert)
 
         # Kamera in eigener Gruppe: eine langsame Bildauswertung blockiert nie die Fahrbefehle
         bild_gruppe = MutuallyExclusiveCallbackGroup()
@@ -101,6 +114,17 @@ class LineFollower(Node):
 
     def p(self, name):
         return self.get_parameter(name).value
+
+    def _parameter_geaendert(self, params):
+        # Einstellungen der Linie/Lenkung gelten sofort (z. B. ros2 param set ... kamera_neigung 30.0)
+        from rcl_interfaces.msg import SetParametersResult
+        for prm in params:
+            if prm.name in linie.STANDARD:
+                self.sucher.c[prm.name] = prm.value
+                self.lenkung.c[prm.name] = prm.value
+                if prm.name.startswith('kamera_') or prm.name == 'zeilen_oben':
+                    self.sucher.groesse = None  # Draufsicht neu berechnen
+        return SetParametersResult(successful=True)
 
     # ---------------- Eingaenge ----------------
     def on_scan(self, msg, topic, i):
@@ -134,33 +158,17 @@ class LineFollower(Node):
         return None
 
     # ---------------- Kamera: Linie suchen ----------------
-    def find_line(self, img, h, w):
-        y0 = int(h * self.p('strip_start'))
-        gray = cv2.cvtColor(img[y0:h, :], cv2.COLOR_BGR2GRAY)
-        gray = cv2.GaussianBlur(gray, (5, 5), 0)
-        _, mask = cv2.threshold(gray, self.p('threshold'), 255, cv2.THRESH_BINARY_INV)
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if contours:
-            biggest = max(contours, key=cv2.contourArea)
-            if cv2.contourArea(biggest) >= self.p('min_area'):
-                m = cv2.moments(biggest)
-                if m['m00'] > 0:
-                    return y0, mask, biggest, int(m['m10'] / m['m00']), int(m['m01'] / m['m00'])
-        return y0, mask, None, None, None
-
     def on_image(self, msg):
         img = self.bridge.imgmsg_to_cv2(msg, 'bgr8')
-        h, w = img.shape[:2]
-        y0, line_mask, biggest, cx, cy = self.find_line(img, h, w)
-        if cx is not None:
-            error = (w / 2) - cx  # positiv = Linie liegt links von der Bildmitte
-            limit = self.p('max_turn')
-            lenkung = (self.p('speed') * self.p('direction'), max(-limit, min(limit, error * self.p('steer_gain'))))
-        else:
-            lenkung = None
         jetzt = time.time()
         with self.lock:
-            self.lenkung, self.bild_zeit = lenkung, jetzt
+            ziel = self.gedaechtnis.linie(jetzt, 0.3)
+            self.sucher.erwartung = ziel['ziel'] if ziel['gefunden'] else None
+        erg = self.sucher.suche(img)
+        with self.lock:
+            self.gedaechtnis.hinzufuegen(erg['boden'], jetzt)
+            self.linie_gesehen = erg['gefunden']
+            self.bild_zeit = jetzt
             self.bild_zaehler += 1
             if jetzt - self.fps_zeit >= 1.0:
                 self.fps = self.bild_zaehler / (jetzt - self.fps_zeit)
@@ -170,14 +178,15 @@ class LineFollower(Node):
         if not (self.p('show') or want_pub):
             return
         view = img.copy()
-        cv2.line(view, (0, y0), (w, y0), (255, 0, 0), 2)               # blau: Beginn Suchbereich Linie
-        cv2.line(view, (w // 2, y0), (w // 2, h), (0, 255, 255), 1)    # gelb: Bildmitte
-        if cx is not None:
-            cv2.drawContours(view[y0:h, :], [biggest], -1, (0, 255, 0), 2)  # gruen: erkannte Linie
-            cv2.circle(view, (cx, y0 + cy), 8, (0, 0, 255), -1)              # rot: Zielpunkt
+        linie.zeichne(view, erg)
+        h, w = view.shape[:2]
         mode = 'FAEHRT' if self.p('drive') else 'TESTMODUS (faehrt nicht)'
         cv2.putText(view, mode, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
         cv2.putText(view, self.status_text[:70], (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+        if erg.get('vogel') is not None:  # kleine Draufsicht rechts oben
+            vogel = cv2.cvtColor(cv2.resize(erg['vogel'], (120, 106)), cv2.COLOR_GRAY2BGR)
+            view[5:111, w - 125:w - 5] = vogel
+            cv2.rectangle(view, (w - 125, 5), (w - 5, 111), (255, 255, 255), 1)
         if want_pub:
             self.last_image_pub = jetzt
             klein = cv2.resize(view, (640, int(h * 640 / w))) if w > 640 else view
@@ -187,47 +196,73 @@ class LineFollower(Node):
                 out.header = msg.header
                 self.pub_image.publish(out)
         if self.p('show'):
-            self.anzeige = (view, line_mask)  # Fenster duerfen nur im Haupt-Thread geoeffnet werden
+            self.anzeige = (view, erg.get('vogel'))  # Fenster duerfen nur im Haupt-Thread geoeffnet werden
 
     # ---------------- Fahrbefehl (20x pro Sekunde) ----------------
     def entscheide(self):
-        """Rueckgabe: (linear, angular, status)."""
+        """Rueckgabe: (vorwaerts, seitwaerts, drehen, status)."""
         jetzt = time.time()
         with self.lock:
-            lenkung, bild_zeit = self.lenkung, self.bild_zeit
+            bild_zeit = self.bild_zeit
+            ziel = self.gedaechtnis.linie(jetzt, self.p('vorausschau'))
+            lokal = self.gedaechtnis.lokal(jetzt)
         grund = self.notbremse()
-        if grund:
-            return 0.0, 0.0, grund + ' -> STOPP'
-        if jetzt - bild_zeit > 0.5:
-            return 0.0, 0.0, 'KEINE KAMERABILDER -> STOPP'
         ki_zeit, ki = self.ki
+        manoever = ki.get('manoever') if (ki and ki.get('aktion') == 'manoever' and jetzt - ki_zeit < 0.6) else None
+        if grund:
+            if manoever and manoever.get('lin', 0) <= 0 and abs(manoever.get('quer', 0)) < 1e-6:
+                # Notbremse: nur Drehen auf der Stelle und Rueckwaerts sind noch erlaubt
+                return self._manoever(manoever, 'Manoever trotz Notbremse (nur drehen/rueckwaerts): ')
+            return 0.0, 0.0, 0.0, grund + ' -> STOPP'
+        if jetzt - bild_zeit > 0.5:
+            return 0.0, 0.0, 0.0, 'KEINE KAMERABILDER -> STOPP'
         faktor = 1.0
         if self.p('ki_pflicht'):
             if ki is None or jetzt - ki_zeit > 0.6:
-                return 0.0, 0.0, 'KI-ZENTRALE ANTWORTET NICHT -> STOPP'
+                return 0.0, 0.0, 0.0, 'KI-ZENTRALE ANTWORTET NICHT -> STOPP'
             if ki.get('aktion') == 'stopp':
-                return 0.0, 0.0, 'KI: ' + ki.get('grund', 'stopp')
+                return 0.0, 0.0, 0.0, 'KI: ' + ki.get('grund', 'stopp')
+            if manoever:
+                return self._manoever(manoever, 'KI-Manoever: ')
             faktor = float(ki.get('faktor', 1.0))
-        if lenkung is None:
-            return 0.0, 0.0, 'KEINE LINIE -> STOPP'
-        lin, ang = lenkung
-        lin *= faktor
-        status = f'Linie: Lenkung {ang:+.2f}, {abs(lin):.2f} m/s'
+        tempo = self.p('speed') * faktor
+        v, dreh, status = self.lenkung.berechne(ziel, tempo, jetzt, lokal)
+        v *= self.p('direction')
         if ki and ki.get('aktion') == 'langsam':
             status += ' (langsam: ' + ki.get('grund', '') + ')'
-        return lin, ang, status
+        return v, 0.0, dreh, status
+
+    def _manoever(self, m, text):
+        """Fahrbefehl der KI (z. B. wenden, zum Greifen ausrichten), begrenzt."""
+        lin = max(-MANOEVER_MAX['lin'], min(MANOEVER_MAX['lin'], float(m.get('lin', 0.0))))
+        quer = max(-MANOEVER_MAX['quer'], min(MANOEVER_MAX['quer'], float(m.get('quer', 0.0))))
+        dreh = max(-MANOEVER_MAX['dreh'], min(MANOEVER_MAX['dreh'], float(m.get('dreh', 0.0))))
+        return lin, quer, dreh, text + m.get('text', '')
 
     def steuern(self):
-        lin, ang, status = self.entscheide()
+        jetzt = time.time()
+        dt = min(0.2, jetzt - self.letzte_steuerung)
+        self.letzte_steuerung = jetzt
+        with self.lock:
+            # eigene Bewegung seit dem letzten Befehl ins Linien-Gedaechtnis rechnen
+            lin_alt, quer_alt, dreh_alt = self.letzter_cmd
+            self.gedaechtnis.bewegen(lin_alt, dreh_alt, dt, quer_alt)
+        lin, quer, dreh, status = self.entscheide()
         self.status_text = status
         if self.p('drive'):
             t = Twist()
-            t.linear.x, t.angular.z = lin, ang
+            t.linear.x, t.linear.y, t.angular.z = lin, quer, dreh
             self.pub.publish(t)
-        self.letzter_cmd = (lin, ang)
+            self.letzter_cmd = (lin, quer, dreh)
+        else:
+            self.letzter_cmd = (0.0, 0.0, 0.0)  # Testmodus: Roboter bewegt sich nicht
+        with self.lock:
+            lokal = self.gedaechtnis.lokal(jetzt)
         self.pub_status.publish(String(data=json.dumps({
-            'status': status, 'drive': self.p('drive'), 'linear': round(lin, 3), 'angular': round(ang, 3),
-            'fps': round(self.fps, 1), 'speed': self.p('speed'), 'linie': self.lenkung is not None})))
+            'status': status, 'drive': self.p('drive'), 'linear': round(lin, 3), 'quer': round(quer, 3),
+            'angular': round(dreh, 3), 'fps': round(self.fps, 1), 'speed': self.p('speed'),
+            'linie': self.linie_gesehen or lokal is not None, 'linie_kamera': self.linie_gesehen,
+            'linie_quer': None if lokal is None else round(lokal['quer'], 3)})))
         self.get_logger().info(status, throttle_duration_sec=1.0)
 
 
@@ -263,10 +298,11 @@ def main():
     try:
         while rclpy.ok():
             if node.anzeige is not None:
-                view, mask = node.anzeige
+                view, vogel = node.anzeige
                 node.anzeige = None
                 cv2.imshow('Linienfolger', view)
-                cv2.imshow('Maske Linie', mask)
+                if vogel is not None:
+                    cv2.imshow('Draufsicht', vogel)
                 cv2.waitKey(1)
             time.sleep(0.03)
     except KeyboardInterrupt:
