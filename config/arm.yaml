@@ -5,8 +5,11 @@
 #   yahboom_linie  = Stellung von Yahboms eigenem Linienfolger (largemodel_arm/follow_line.py)
 #   pruefblick     = noch nicht festgelegt -> im Panel einstellen und speichern
 #   blick_links/rechts = Umschauen am Zebrastreifen
-# ki_darf_arm_bewegen: true = KI darf bei unklarer LiDAR-Meldung im STAND kurz in den
-#   "pruefblick" schauen und danach zurueck in die "fahrstellung" (erst wenn beide Posen da sind).
+# ki_darf_arm_bewegen: true = KI darf den Arm bewegen (nur im STAND und nur mit eingelernten Posen):
+#   - unklare LiDAR-Meldung: kurz in den "pruefblick" schauen
+#   - Zebrastreifen: nach links/rechts schauen (blick_links, blick_rechts)
+#   - kleines Hindernis aufheben und zur Seite legen (greifen, greifen_hoch, ablegen)
+#   Danach immer zurueck in die "fahrstellung".
 posen:
   fahrstellung: [90, 120, 10, 20, 90, 30]
   yahboom_linie: [90, 90, 12, 20, 90, 30]
