@@ -869,6 +869,9 @@ function zeigeDashboard() {
   $('g-meta').textContent = meta.join(' · ');
   // Wahrnehmung als Chips
   const box = $('sinne'); box.innerHTML = '';
+  for (const f of S.fremde || []) chip(box, `${f} läuft außerhalb des Panels (alte Version?) → scripts/stopp.sh`, 'rot');
+  if (S.fahren && !lf) chip(box, `Linienfolger meldet sich nicht${S.lf_alter != null ? ' seit ' + fmt(S.lf_alter, 0) + ' s' : ''} (überlastet?)`, 'rot');
+  if (lf && lf.bild_alter != null && lf.bild_alter > 0.25) chip(box, `Kamerabilder ${fmt(lf.bild_alter, 2)} s alt`, lf.bild_alter > 0.6 ? 'rot' : 'gelb');
   if (!ki) chip(box, 'KI aus', 'rot');
   else {
     if (ki.ablauf) chip(box, `${ABLAUF_NAME[ki.ablauf] || ki.ablauf}: ${ki.ablauf_phase}`, 'lila');
@@ -880,6 +883,7 @@ function zeigeDashboard() {
     chip(box, d == null ? 'LiDAR fehlt' : d >= 5 ? 'LiDAR: Weg frei' : `LiDAR: ${Math.round(d * 100)} cm im Weg`, d == null || d < 0.12 ? 'rot' : d < 0.45 ? 'gelb' : 'gruen');
     chip(box, ki.tiefe_hindernis === null ? 'Tiefe lernt ...' : ki.tiefe_hindernis ? 'Tiefe: Hindernis' : 'Tiefe: frei', ki.tiefe_hindernis ? 'rot' : ki.tiefe_hindernis === false ? 'gruen' : 'aus');
   }
+  if (lf && lf.bewegung_quelle) chip(box, 'Bewegung: ' + lf.bewegung_quelle, lf.bewegung_quelle === 'Fahrbefehle' && S.fahren ? 'gelb' : '');
   chip(box, !lf ? 'Linie: aus' : lf.linie ? `Linie ${lf.linie_quer != null ? fmt(lf.linie_quer * 100, 1) + ' cm' : 'ok'}` : 'Linie weg', !lf ? 'aus' : lf.linie ? 'gruen' : 'gelb');
   const k = S.karte;
   chip(box, k ? (k.x !== undefined ? `Karte ok (Fahrt ${k.fahrten})` : 'Karte: suche Position') : 'Karte aus', k && k.x !== undefined ? 'gruen' : 'aus');
@@ -923,9 +927,20 @@ function zeigeSensoren() {
     z.className = x.ok === null ? '' : x.ok ? 'ok' : 'schlecht';
   }
   const pt = $('programmtabelle'); pt.innerHTML = '';
-  for (const [name, an] of [['KI-Zentrale', !!S.ki], ['Linienfolger', S.fahren], ['Kartograf', S.kartograf]]) {
+  for (const [name, an, text] of [['KI-Zentrale', !!S.ki, ''], ['Kartograf', S.kartograf, ''],
+                                  ['Linienfolger', S.fahren, S.fahren && !S.lf ? 'läuft, meldet sich aber nicht' : '']]) {
     const tr = pt.insertRow(); tr.insertCell().textContent = name;
-    const z = tr.insertCell(); z.textContent = an ? 'läuft' : 'aus'; z.className = an ? 'ok' : '';
+    const fremd = (S.fremde || []).includes(name);
+    const z = tr.insertCell();
+    z.textContent = fremd ? 'läuft AUSSERHALB des Panels (alte Version?)' : text || (an ? 'läuft' : 'aus');
+    z.className = fremd || text ? 'schlecht' : an ? 'ok' : '';
+  }
+  if (S.lf) {
+    const tr = pt.insertRow(); tr.insertCell().textContent = 'Kamerabild-Alter (Linienfolger)';
+    const z = tr.insertCell(); z.textContent = fmt(S.lf.bild_alter || 0, 2) + ' s' + (S.lf.zeitstempel_ok === false ? ' (Zeitstempel unbrauchbar)' : '');
+    z.className = (S.lf.bild_alter || 0) > 0.25 ? 'schlecht' : 'ok';
+    const tr2 = pt.insertRow(); tr2.insertCell().textContent = 'Eigene Bewegung gemessen mit';
+    tr2.insertCell().textContent = S.lf.bewegung_quelle || '?';
   }
 }
 function zeigeSystem() {

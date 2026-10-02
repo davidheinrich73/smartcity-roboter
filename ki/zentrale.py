@@ -395,6 +395,7 @@ class Zentrale(Node):
         self.lidar_d = w['lidar']
         w['lidar_xy'] = self.lidar_xy if w['lidar'] is not None else None
         w['lidar_hinten'] = self.lidar_hinten()
+        w['weg'] = self.weg_voraus()
         w['gier'] = self.gier
         st = self.linie_status
         # Faehrt das Fahrprogramm wirklich? Nur dann darf die KI den Arm bewegen (nicht im TEST, nicht nach STOPP)

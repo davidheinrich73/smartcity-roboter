@@ -14,6 +14,7 @@
 #    In Kurven langsamer. Linie weg: zur Seite drehen, wo sie zuletzt war, bis sie wieder da ist.
 import math
 import time
+from collections import deque
 
 import cv2
 import numpy as np
@@ -35,7 +36,8 @@ STANDARD = {
     'regel_abstand': 44.0,    # Nachregeln seitlicher Abstand (1/m^2), 'regel_richtung' ~ 2*Wurzel davon
     'regel_richtung': 13.0,   # Nachregeln Richtung (1/m) -> gedaempft, ohne Schlingern
     'min_tempo': 0.4,         # Kurve: mindestens so viel vom Tempo
-    'such_zeit': 3.0,         # Linie weg: so lange suchen (s), danach Stopp
+    'such_zeit': 0.8,         # Linie weg: so lange (s) vorsichtig zur letzten Seite drehen (ca. 30 Grad), dann Stopp.
+                              # Nicht laenger: blindes Drehen kann Aufbauten streifen (Zieldefinition 4.1)
     'such_dreh': 0.7,         # Drehgeschwindigkeit beim Suchen (rad/s)
 }
 
@@ -172,13 +174,27 @@ class Gedaechtnis:
         self.punkte = np.zeros((0, 3))  # x, y (im Mitrechen-System), Fahrzeit beim Sehen
         self.max_alter = max_alter      # Sekunden FAHRZEIT
         self.uhr = 0.0                  # Fahrzeit (laeuft im Stand/beim Drehen nur 10x langsamer)
+        self.verlauf = deque(maxlen=200)  # (Zeit, Pose) der letzten ~10 s: wo war der Roboter wann?
 
-    def bewegen(self, v, dreh, dt, quer=0.0):
+    def bewegen(self, v, dreh, dt, quer=0.0, jetzt=None):
         x, y, w = self.pose
         self.pose = [x + (v * math.cos(w) - quer * math.sin(w)) * dt,
                      y + (v * math.sin(w) + quer * math.cos(w)) * dt, w + dreh * dt]
         faehrt = abs(v) >= 0.005 or abs(quer) >= 0.005
         self.uhr += dt * (1.0 if faehrt else 0.1)
+        if jetzt is not None:
+            self.verlauf.append((jetzt, tuple(self.pose)))
+
+    def pose_bei(self, zeit):
+        """Wo war der Roboter (Mitrechen-System) zur Zeit 'zeit'? Fuer Kamerabilder, die verspaetet ankommen."""
+        if zeit is None or not self.verlauf or zeit >= self.verlauf[-1][0]:
+            return tuple(self.pose)
+        frueher = self.pose
+        for t, pose in reversed(self.verlauf):
+            if t <= zeit:
+                return pose
+            frueher = pose
+        return tuple(frueher)            # aelter als der Verlauf: aelteste bekannte Pose
 
     def _zu_roboter(self, p):
         x, y, w = self.pose
@@ -188,9 +204,11 @@ class Gedaechtnis:
     def _frisch(self):
         return self.punkte[self.punkte[:, 2] > self.uhr - self.max_alter]
 
-    def hinzufuegen(self, boden):
-        """boden: Linienpunkte (x, y) in m, so wie die Kamera sie gerade sieht."""
-        x, y, w = self.pose
+    def hinzufuegen(self, boden, aufnahme=None):
+        """boden: Linienpunkte (x, y) in m, so wie die Kamera sie gesehen hat.
+        aufnahme: Zeitpunkt der Aufnahme. Kommt das Bild verspaetet an, werden die Punkte dort eingetragen,
+        wo der Roboter BEIM FOTOGRAFIEREN stand (sonst laege die Linie um die inzwischen gefahrene Strecke falsch)."""
+        x, y, w = self.pose_bei(aufnahme)
         alt = self._frisch()
         if len(alt):
             r = self._zu_roboter(alt)
@@ -202,7 +220,8 @@ class Gedaechtnis:
         if len(neu) and len(alt):
             # Was die Kamera gerade sieht, ersetzt alte Punkte im selben Bereich
             r = self._zu_roboter(alt)
-            alt = alt[r[:, 0] < min(b[0] for b in boden)]   # naeher als das, was sie gerade sieht
+            naechster_neu = self._zu_roboter(neu)[:, 0].min()
+            alt = alt[r[:, 0] < naechster_neu]   # naeher als das, was sie gerade sieht
         self.punkte = np.vstack([alt, neu])[-3000:]
 
     def lokal(self):

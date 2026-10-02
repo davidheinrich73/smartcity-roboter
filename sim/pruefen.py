@@ -27,6 +27,7 @@ import karte as K      # noqa: E402
 DAUER = float(os.environ.get('SIM_DAUER', 150))
 SZENARIO = os.environ.get('SIM_SZENARIO', 'normal')   # normal | einsatz
 LOGS = os.environ.get('SIM_LOGS', '/tmp')
+VERZ = float(os.environ.get('SIM_VERZOEGERUNG', 0.0))   # Kamerabild kommt so viele s zu spaet (Ueberlast)
 GEGNER = bool(os.environ.get('SIM_GEGNER'))   # anderer Roboter blockiert die Linie -> muss ausweichen
 KARTEN = os.environ.get('SIM_KARTE_ORDNER', os.path.join(LOGS, 'sim_karten'))
 
@@ -44,7 +45,8 @@ def main():
     cfg = ['--params-file', os.path.join(REPO, 'config', 'roboter.yaml')]
     prozesse = [
         starte([sys.executable, os.path.join(REPO, 'sim', 'simulator.py')]
-               + (['--ros-args', '-p', 'gegner:=true'] if GEGNER else []), 'simulator', env),
+               + ['--ros-args', '-p', f'gegner:={str(GEGNER).lower()}', '-p', f'kamera_verzoegerung:={VERZ}'],
+               'simulator', env),
         starte([sys.executable, os.path.join(REPO, 'ki', 'zentrale.py'), '--ros-args'] + cfg, 'ki', env),
         starte([sys.executable, os.path.join(REPO, 'line_follower', 'line_follower.py'), '--ros-args'] + cfg +
                ['-p', 'drive:=true', '-p', 'show:=false'], 'linienfolger', env),
@@ -115,7 +117,9 @@ def auswerten(zustaende, ereignisse, karte=()):
     print('\nPruefungen:')
     gesamt = zustaende[-1]['gefahren']
     check('Roboter faehrt', gesamt > 2.0, f'({gesamt:.1f} m gefahren)')
-    fahrt = [z for z in zustaende if z['v'] > 0.05 and abs(z['quer']) < 1e-3]
+    # Spurtreue: ohne die Aufheben-Stelle (dort faehrt er absichtlich seitlich zum Wuerfel und zurueck)
+    fahrt = [z for z in zustaende if z['v'] > 0.05 and abs(z['quer']) < 1e-3
+             and not (welt.wuerfel_s - 0.4 < z['s'] < welt.wuerfel_s + 0.3)]
     schnell = max((z['v'] for z in zustaende), default=0)
     erwartet = (0.17, 0.25) if SZENARIO == 'einsatz' else (0.12, 0.17)
     check('Geschwindigkeit (normal 0,15 m/s, Einsatz x1,3)', erwartet[0] <= schnell <= erwartet[1],

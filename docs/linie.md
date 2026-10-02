@@ -17,6 +17,20 @@ Jetzt:
 
 Simulation (Rundkurs mit Kurvenradius 25 cm): größte Abweichung **1,9–2,7 cm** bei 2–15 Bildern/s und 0,15–0,25 m/s. Vorher waren es 7,4 cm, und die Linie ging verloren. Mit 4° falscher Kameraneigung sind es ca. 4 cm.
 
+## Verspätete Kamerabilder (wichtig auf dem echten Roboter)
+
+Ist der Rechner ausgelastet, kommen Kamerabilder verspätet an. Früher hat der Linienfolger die Linie dort eingetragen, wo der Roboter beim **Auswerten** stand. Bei 0,3 s Verspätung und 0,15 m/s liegt sie dann 4,5 cm falsch, in Kurven auch noch verdreht. Er hat also nach einem alten Bild gelenkt.
+
+Jetzt:
+- **Aufnahmezeit**: Er trägt die Linie dort ein, wo er beim **Fotografieren** stand (Zeitstempel der Kamera).
+- **Bild älter als 0,25 s**: halbes Tempo. **Älter als 0,6 s**: STOPP mit Meldung „KAMERABILDER ZU ALT“ (`bild_alter_langsam`, `bild_alter_max`).
+- **Eigene Bewegung**: kommt aus Radzählern (`/odom_raw`) und Lagesensor (`/imu/data_raw`), nicht mehr aus den Fahrbefehlen. Vorher prüft er, ob die Messung zur Fahrtrichtung passt (falsches Vorzeichen → Fahrbefehle).
+- Das Panel zeigt unter Sensoren das Bildalter und die Quelle der Bewegung.
+
+Simulation mit 0,3 s Verspätung: Der alte Linienfolger war bis 5,1 cm daneben, der neue 1,8–3 cm.
+
+**Linie weg:** Er dreht nur noch ca. 30° zur Seite, wo die Linie zuletzt war (`such_zeit` 0,8 s), dann STOPP. Vorher drehte er 3 s lang, das sieht aus wie im Kreis fahren und kann Aufbauten streifen.
+
 ## Kamera nachmessen (wichtig!)
 
 Die Werte sind **geschätzt**. Messen, wenn der Arm in der **Fahrstellung** steht:
