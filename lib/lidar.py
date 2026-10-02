@@ -95,20 +95,24 @@ def abstand_zum_weg(xy, weg=None, laenge=0.8):
     return dist[i, j], kum[j] + t[i, j] * seglen[j]
 
 
-def fahrschlauch(xy, weg=None, halbe_breite=0.15, laenge=0.8):
+def fahrschlauch(xy, weg=None, halbe_breite=0.15, laenge=0.8, nah=0.2, nah_halb_deg=30.0):
     """Naechster Gegenstand im FAHRSCHLAUCH: dem Streifen, den der Roboter ueberfaehrt, wenn er dem
     Weg folgt (z. B. der Linie in eine Kurve hinein). Haeuser neben der Kurve stoeren so nicht.
+    Naeher als 'nah' zaehlt zusaetzlich nur der Kegel +-nah_halb_deg nach vorne (wie frueher): seitlich
+    direkt neben dem Roboter sieht der LiDAR evtl. eigene Teile (Raeder, Arm).
 
     xy: Punkte (punkte_xy), weg: [(x, y), ...] Punkte der Linie vor dem Roboter (Roboter-System)
     oder None = geradeaus. Rueckgabe: None oder dict abstand (m entlang des Wegs), vor, seite (m, Mitte
     im Roboter-System), breite (m), quer (m, seitlicher Abstand zur Wegmitte)."""
     if len(xy) == 0:
         return None
+    xy = np.asarray(xy, dtype=np.float64).reshape(-1, 2)
     quer, entlang = abstand_zum_weg(xy, weg, laenge)
-    drin = (quer < halbe_breite) & (entlang > 0.0) & (entlang <= laenge)
+    im_kegel = np.abs(np.arctan2(xy[:, 1], xy[:, 0])) <= math.radians(nah_halb_deg)
+    drin = (quer < halbe_breite) & (entlang > 0.0) & (entlang <= laenge) & ((entlang > nah) | im_kegel)
     if not np.any(drin):
         return None
-    xy, entlang, quer = np.asarray(xy)[drin], entlang[drin], quer[drin]
+    xy, entlang, quer = xy[drin], entlang[drin], quer[drin]
     k = int(np.argmin(entlang))
     teil = np.hypot(xy[:, 0] - xy[k, 0], xy[:, 1] - xy[k, 1]) < 0.04
     return {'abstand': float(entlang[k]), 'vor': float(xy[k, 0]), 'seite': float(np.mean(xy[teil, 1])),

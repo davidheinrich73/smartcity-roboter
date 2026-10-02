@@ -69,6 +69,7 @@ class Kartograf(Node):
         dp('scan_front_deg', [0.0, 0.0])
         dp('obstacle_min_range', 0.08)
         dp('lidar_x', 0.0)                       # LiDAR so weit vor der Robotermitte (m) - nachmessen
+        dp('karte_min_abstand', 0.15)            # naeher (m) nicht in die Karte (eigene Teile, Beruehrung)
         dp('odom_topic', '/odom_raw')
         dp('imu_topic', '/imu/data_raw')
         dp('image_topic', '/camera/color/image_raw')
@@ -172,6 +173,7 @@ class Kartograf(Node):
     def _scan(self, msg, topic, i):
         fronts = self.p('scan_front_deg')
         xy = lidar.punkte_xy(msg, fronts[i] if i < len(fronts) else 0.0, self.p('obstacle_min_range'))
+        xy = xy[np.hypot(xy[:, 0], xy[:, 1]) >= self.p('karte_min_abstand')]
         xy[:, 0] += self.p('lidar_x')
         self.scans[topic] = (time.time(), xy)
 
