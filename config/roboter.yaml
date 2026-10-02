@@ -10,12 +10,6 @@
     scan_front_deg: [0.0, 0.0]
     obstacle_half_deg: 30.0
     obstacle_min_range: 0.08
-    # Kamera am Arm in Fahrstellung. GESCHAETZT - bitte am Roboter nachmessen!
-    # Am wichtigsten ist die Neigung: 4 Grad daneben = Linie bis 4 cm ungenauer.
-    kamera_hoehe: 0.22      # Hoehe ueber dem Boden (m)
-    kamera_neigung: 32.0    # wie weit sie nach unten schaut (Grad)
-    kamera_fov: 70.0        # waagrechter Blickwinkel (Grad)
-    kamera_x: 0.12          # wie weit vor der Robotermitte (m)
 line_follower:
   ros__parameters:
     obstacle_check: true

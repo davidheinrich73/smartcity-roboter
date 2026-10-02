@@ -17,6 +17,12 @@ export FASTRTPS_DEFAULT_PROFILES_FILE="${FASTRTPS_DEFAULT_PROFILES_FILE:-$(cd "$
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export REPO_DIR
 
+# Einstellungsdateien fuer ROS-Programme (spaetere gelten vor frueheren, siehe lib/einstellungen.py):
+# Standard (Repository), Ampelwerte (falls kalibriert), eigene Werte dieses Roboters (config/lokal/).
+PARAMS=(--params-file "$REPO_DIR/config/roboter.yaml")
+[ -f "$REPO_DIR/config/ampel.yaml" ] && PARAMS+=(--params-file "$REPO_DIR/config/ampel.yaml")
+[ -f "$REPO_DIR/config/lokal/roboter.yaml" ] && PARAMS+=(--params-file "$REPO_DIR/config/lokal/roboter.yaml")
+
 # Sucht eine Launch-Datei in einem ROS-Paket. Gibt den Pfad aus oder nichts.
 # Beispiel: finde_launch slam_mapping slam_toolbox.launch.py
 finde_launch() {

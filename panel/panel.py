@@ -44,9 +44,8 @@ sys.path.insert(0, os.path.join(REPO, 'lib'))
 sys.path.insert(0, os.path.join(REPO, 'ki'))
 import lidar           # noqa: E402
 import arm as armlib   # noqa: E402
+import einstellungen   # noqa: E402
 from entscheider import STANDARD as KI_STANDARD  # noqa: E402
-
-ROBOTER_YAML = os.path.join(REPO, 'config', 'roboter.yaml')
 
 # Szenarien: Name -> Beschreibung + was an KI und Linienfolger geht. Neue einfach ergaenzen.
 SZENARIEN = {
@@ -73,26 +72,9 @@ AKKU_VOLL, AKKU_LEER, AKKU_WARNUNG = 12.6, 10.5, 11.0
 
 def lade_lidar_einstellungen():
     try:
-        import yaml
-        with open(ROBOTER_YAML) as f:
-            daten = yaml.safe_load(f) or {}
-        p = dict((daten.get('/**') or {}).get('ros__parameters', {}))
-        p.update((daten.get('line_follower') or {}).get('ros__parameters', {}))
-        return p
+        return einstellungen.lade('line_follower')
     except Exception:
         return {}
-
-
-def speichere_lidar_winkel(winkel):
-    """Schreibt scan_front_deg in config/roboter.yaml (Kommentare bleiben erhalten)."""
-    with open(ROBOTER_YAML) as f:
-        text = f.read()
-    neu = '[' + ', '.join(f'{float(w):.1f}' for w in winkel) + ']'
-    text, n = re.subn(r'(scan_front_deg:\s*)\[[^\]]*\]', lambda m: m.group(1) + neu, text)
-    if n == 0:
-        raise ValueError('scan_front_deg nicht in config/roboter.yaml gefunden')
-    with open(ROBOTER_YAML, 'w') as f:
-        f.write(text)
 
 
 def ip_adressen():
@@ -358,16 +340,14 @@ def param_setzen(knoten, name, wert):
 
 
 def mache_handler(node, prozesse, beenden=None):
-    cfg_dateien = ['--params-file', ROBOTER_YAML]
-    if os.path.exists(os.path.join(REPO, 'config', 'ampel.yaml')):
-        cfg_dateien += ['--params-file', os.path.join(REPO, 'config', 'ampel.yaml')]
     zustand = {'tempo': 0.15}
 
     def ki_starten():
-        return prozesse.start('ki', [sys.executable, os.path.join(REPO, 'ki', 'zentrale.py'), '--ros-args'] + cfg_dateien)
+        return prozesse.start('ki', [sys.executable, os.path.join(REPO, 'ki', 'zentrale.py'), '--ros-args']
+                              + einstellungen.ros_argumente())
 
     def lf_befehl(drive):
-        return [sys.executable, os.path.join(REPO, 'line_follower', 'line_follower.py'), '--ros-args'] + cfg_dateien + [
+        return [sys.executable, os.path.join(REPO, 'line_follower', 'line_follower.py'), '--ros-args'] + einstellungen.ros_argumente() + [
             '-p', f'drive:={"true" if drive else "false"}', '-p', 'show:=false', '-p', f"speed:={zustand['tempo']}"]
 
     def aktion(name, daten, lokal):
@@ -430,16 +410,11 @@ def mache_handler(node, prozesse, beenden=None):
                 if fehler:
                     return fehler
                 armlib.speichere_pose(pose, daten['winkel'])
-                return f'Pose "{pose}" gespeichert (config/arm.yaml). KI neu starten, damit sie sie kennt.'
+                return f'Pose "{pose}" gespeichert (config/lokal/arm.yaml). KI neu starten, damit sie sie kennt.'
             if name == 'arm_ki':
-                einst = armlib.lade_einstellungen()
-                posen = einst.get('posen') or {}
-                if daten.get('erlaubt') and not (posen.get('fahrstellung') and posen.get('pruefblick')):
-                    return 'Erst die Posen "fahrstellung" und "pruefblick" speichern.'
-                einst['ki_darf_arm_bewegen'] = bool(daten.get('erlaubt'))
-                import yaml
-                with open(armlib.POSEN_DATEI, 'w') as f:
-                    yaml.safe_dump(einst, f, allow_unicode=True, sort_keys=False)
+                if daten.get('erlaubt') and not armlib.lade_posen().get('fahrstellung'):
+                    return 'Erst die Pose "fahrstellung" speichern.'
+                armlib.speichere_einstellung('ki_darf_arm_bewegen', bool(daten.get('erlaubt')))
                 return 'Gespeichert. KI neu starten (KI stoppen + starten), damit es gilt.'
             if name == 'arm_diagnose':
                 return topics_mit(['arm', 'servo', 'joint', 'grip', 'claw'])
@@ -450,11 +425,11 @@ def mache_handler(node, prozesse, beenden=None):
                 node.scan_front[i] = ((grad + 180) % 360) - 180
             return f"Vorne fuer {node.scan_topics[i]}: {node.scan_front[i]:.0f} Grad (noch nicht gespeichert)"
         if name == 'lidar_speichern':
-            speichere_lidar_winkel(node.scan_front)
+            einstellungen.speichere('scan_front_deg', [round(float(w), 1) for w in node.scan_front])
             wert = '[' + ', '.join(f'{w:.1f}' for w in node.scan_front) + ']'
-            param_setzen('/ki_zentrale', 'scan_front_deg', wert)
-            param_setzen('/line_follower', 'scan_front_deg', wert)
-            return 'Gespeichert in config/roboter.yaml und an KI + Linienfolger geschickt.'
+            for knoten in ('/ki_zentrale', '/line_follower', '/kartograf'):
+                param_setzen(knoten, 'scan_front_deg', wert)
+            return 'Gespeichert in config/lokal/roboter.yaml und an KI, Linienfolger und Kartograf geschickt.'
         # ---- System ----
         if name == 'netz':
             if not lokal:
@@ -464,7 +439,8 @@ def mache_handler(node, prozesse, beenden=None):
         if name == 'update':
             if prozesse.laeuft('fahren'):
                 return 'Erst STOPP druecken.'
-            r = subprocess.run(['git', '-C', REPO, 'pull'], capture_output=True, text=True, timeout=60)
+            r = subprocess.run(['bash', os.path.join(REPO, 'scripts', 'update.sh')], capture_output=True, text=True,
+                               timeout=90)
             return (r.stdout + r.stderr).strip() + '\nPanel neu starten, damit Aenderungen gelten.'
         if name == 'beenden' and beenden:
             threading.Thread(target=beenden, daemon=True).start()

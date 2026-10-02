@@ -3,9 +3,7 @@
 # Zusaetzliche Einstellungen anhaengen, z. B.:  scripts/fahren.sh -p speed:=0.1
 source "$(dirname "$0")/env.sh"
 export DISPLAY="${DISPLAY:-:0}"
-# Einstellungen laden: roboter.yaml (LiDAR) und, falls vorhanden, ampel.yaml
-PARAMS=(--params-file "$REPO_DIR/config/roboter.yaml")
-[ -f "$REPO_DIR/config/ampel.yaml" ] && PARAMS+=(--params-file "$REPO_DIR/config/ampel.yaml")
+# Einstellungen: PARAMS kommt aus env.sh (roboter.yaml, ampel.yaml, lokal/roboter.yaml)
 if ! ros2 node list 2>/dev/null | grep -q ki_zentrale; then
     echo "HINWEIS: KI-Zentrale laeuft nicht -> der Roboter bleibt stehen. Zweites Fenster: scripts/ki.sh"
 fi
