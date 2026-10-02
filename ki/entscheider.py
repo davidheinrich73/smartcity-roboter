@@ -12,11 +12,13 @@
 #   2. KI bekommt keine Bilder / kein LiDAR -> stopp (wer nichts sieht, faehrt nicht)
 #   3. LiDAR meldet etwas im Pruefbereich -> KI prueft mit Kamera-KI und Tiefenkamera:
 #        bestaetigt -> stopp, bis der Weg wieder frei ist
-#        nicht bestaetigt -> langsam (ggf. vorher mit dem Arm genauer hinschauen)
-#   4. KI sieht Person/Auto/... im Weg  -> stopp
-#      Tiefenkamera allein sieht etwas im Weg (z. B. Wuerfel unter der LiDAR-Ebene) -> stopp
+#        nicht bestaetigt -> langsam (ggf. vorher mit dem Arm genauer hinschauen),
+#                            naeher als lidar_halt -> trotzdem stopp
+#      Der LiDAR prueft nur den FAHRSCHLAUCH (Streifen entlang der Linie, siehe ki/zentrale.py).
 #      Ist es klein und kein Lebewesen/Fahrzeug und der Arm freigegeben: AUFHEBEN und beiseitelegen
-#   4. KI sieht Person/Auto/... im Weg  -> stopp
+#   4. Tiefenkamera allein sieht etwas im Weg (z. B. Wuerfel unter der LiDAR-Ebene) -> stopp
+#      bzw. aufheben (wie bei 3.)
+#      KI sieht Person/Auto/... im Weg  -> stopp
 #   5. Schild "Einfahrt verboten" (Einbahnstrasse) -> WENDEN
 #   6. Zebrastreifen -> anhalten, umschauen, warten bis frei
 #   7. Ampel rot/gelb -> stopp, bis gruen (oder Ampel nicht mehr zu sehen)
@@ -31,6 +33,7 @@ FAHRZEUGE = {'Auto', 'Bus', 'LKW', 'Motorrad', 'Fahrrad', 'Zug'}
 STANDARD = {
     'notbremse_dist': 0.12,    # LiDAR naeher (m) -> sofort Stopp, ohne Rueckfrage
     'pruef_dist': 0.45,        # LiDAR naeher (m) -> KI prueft
+    'lidar_halt': 0.20,        # LiDAR (im Fahrschlauch) naeher, aber nicht bestaetigt -> trotzdem halten
     'lidar_pflicht': True,     # ohne LiDAR-Daten nicht fahren
     'frei_zeit': 1.0,          # so lange muss der Weg frei sein, bis ein Hindernis-Stopp endet (s)
     'langsam_faktor': 0.5,     # Geschwindigkeit bei "langsam"
@@ -46,7 +49,9 @@ STANDARD = {
     'arm_zeit': 1.5,           # so lange braucht der Arm fuer eine Bewegung (s)
     # Zebrastreifen
     'zebra_halt': 0.33,        # Zebrastreifen naeher als das (m, ab Robotermitte) -> anhalten
-    'zebra_lidar': 0.5,        # LiDAR sieht etwas naeher als das (breiter Bereich vorne) -> jemand kommt
+    'zebra_lidar': 0.5,        # ohne LiDAR-Punkte: etwas naeher als das (breit vorne) -> jemand kommt
+    'zebra_seite': 0.30,       # LiDAR-Punkte bis so weit links/rechts der Fahrlinie gehoeren zum Zebrastreifen
+    'zebra_tiefe': 0.25,       # ... und bis so weit hinter seiner vorderen Kante (m)
     'zebra_schauen': 0.8,      # so lange in jede Richtung schauen (s), nachdem der Arm steht
     'zebra_warten': 2.0,       # jemand da -> so lange warten, dann neu schauen (s)
     'zebra_weg': 2.0,          # nach dem Ueberqueren: erst wieder beachten, wenn so lange nicht gesehen
@@ -100,6 +105,7 @@ class Entscheider:
         self.arm_warten_bis = 0.0
         self.letzte_aktion = None
         self.letzter_grund = None
+        self.jetzt = 0.0
 
     def _ereignis(self, jetzt, text, art='info'):
         self.ereignisse.append((jetzt, text, art))
@@ -113,14 +119,23 @@ class Entscheider:
           stoppschild, schild_quelle   True/False
           lidar                naechster Abstand vorne (m), inf = frei, None = keine Daten
           tiefe_hindernis      True/False, None = Tiefenkamera nicht bereit
-        Rueckgabe: {'aktion', 'faktor', 'grund', 'arm'}
+          lidar_breit          wie lidar, aber breiter Bereich vorne (Zebrastreifen)
+          objekt               naechster Gegenstand {vor, seite, breite, hoehe} (Tiefenkamera/LiDAR)
+          zebra                None | {abstand} ; einfahrt_verboten True/False
+          gier                 aufsummierte Drehung (rad, IMU) ; linie {kamera, quer} vom Linienfolger
+        Rueckgabe: {'aktion', 'faktor', 'grund', 'arm', 'manoever'}
         """
         einsatz = szenario == 'einsatz'
+        self.jetzt = jetzt
         neues_bild = w.get('bild_nr', -1) != self.letzte_bild_nr
         if neues_bild:
             self.letzte_bild_nr = w.get('bild_nr', -1)
-            self._ampel_bild(jetzt, w)
-            self._schild_bild(jetzt, w)
+            if self.ablauf is None and self.arm_in_fahrstellung:
+                # Ampel/Schild nur zaehlen, wenn die Kamera normal nach vorne schaut (nicht beim
+                # Umschauen oder Greifen). Sonst liefe z. B. die Haltezeit am Stoppschild waehrend
+                # des Aufhebens ab. Nach dem Ablauf sieht die Kamera Ampel/Schild ja wieder.
+                self._ampel_bild(jetzt, w)
+                self._schild_bild(jetzt, w)
             self.einfahrt_n = self.einfahrt_n + 1 if w.get('einfahrt_verboten') else 0
             if w.get('zebra'):
                 self.zebra_zuletzt = jetzt
@@ -246,10 +261,13 @@ class Entscheider:
                 return self._b('stopp', 'Hindernis war bestaetigt -> warte, bis der Weg frei ist')
             if w.get('bild_zeit', 0.0) < self.meldung_seit:
                 return self._b('langsam', 'LiDAR meldet etwas -> KI schaut nach ...', c['langsam_faktor'])
-            if (self.arm_erlaubt and not self.geprueft_frei
+            if (self.arm_erlaubt and self.posen.get('pruefblick') and not self.geprueft_frei
                     and jetzt - self.meldung_seit >= c['umschauen_nach']):
                 return self._arm_starten(jetzt)
-            grund = 'LiDAR-Meldung nicht bestaetigt (z. B. Haus am Rand) -> langsam'
+            if d < c['lidar_halt']:
+                # Der LiDAR schaut nur in den Fahrschlauch: so nah = wuerde gleich anstossen
+                return self._b('stopp', f'LiDAR: etwas {d * 100:.0f} cm im Weg, Kamera sieht nichts -> halte')
+            grund = 'LiDAR-Meldung nicht bestaetigt -> langsam'
             if self.geprueft_frei:
                 grund = 'Arm hat nachgeschaut: nichts im Weg -> langsam'
             return self._b('langsam', grund, c['langsam_faktor'])
@@ -286,7 +304,7 @@ class Entscheider:
         if z and not self.zebra_gesperrt and z['abstand'] <= c['zebra_halt']:
             self._ereignis(jetzt, f"Zebrastreifen {z['abstand'] * 100:.0f} cm voraus -> anhalten, umschauen", 'stopp')
             posen = self.posen if self.arm_erlaubt else {}
-            return self._ablauf_start(jetzt, Zebrastreifen(jetzt, c, posen))
+            return self._ablauf_start(jetzt, Zebrastreifen(jetzt, c, posen, z['abstand']))
         # 5./6. Verkehrsregeln
         if self.ampel_halt:
             if einsatz:
@@ -315,6 +333,7 @@ class Entscheider:
             self.arm_zurueck_noetig = True
         if a.name == 'zebra':
             self.zebra_gesperrt = True
+            self.zebra_zuletzt = jetzt   # beim Umschauen sah die Kamera den Zebrastreifen nicht
         elif a.name == 'wenden':
             self.einfahrt_gesperrt_bis = jetzt + 6.0
             self.einfahrt_n = 0
@@ -380,8 +399,9 @@ class Entscheider:
 
     @property
     def arm_in_fahrstellung(self):
-        """Fuer die Tiefenkamera: Nur in Fahrstellung stimmt das Kameramodell."""
-        return (self.arm_phase is None and not self.arm_zurueck_noetig
+        """Schaut die Kamera (am Arm) normal nach vorne? Nur dann stimmen Draufsicht, Linie und
+        Tiefenkamera-Bodenmodell. Waehrend der Arm zurueckfaehrt (arm_warten_bis) noch nicht."""
+        return (self.arm_phase is None and not self.arm_zurueck_noetig and self.jetzt >= self.arm_warten_bis
                 and not (self.ablauf is not None and self.ablauf.arm_bewegt))
 
     @staticmethod

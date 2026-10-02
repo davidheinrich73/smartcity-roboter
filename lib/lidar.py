@@ -57,3 +57,52 @@ def naechstes_objekt(msg, front_deg=0.0, halb_deg=30.0, min_abstand=0.08):
     teil = np.hypot(x - x[i], y - y[i]) < 0.04
     return {'vor': float(x[i]), 'seite': float(np.mean(y[teil])),
             'breite': float(np.ptp(y[teil]) + 0.01), 'abstand': float(r[i])}
+
+
+def punkte_xy(msg, front_deg=0.0, min_abstand=0.08):
+    """Alle gueltigen Punkte als numpy-Array [[x, y], ...] (x vorne, y links), ohne eigene Roboterteile."""
+    a, r = winkel_und_abstand(msg, front_deg)
+    ok = r > min_abstand
+    return np.stack([r[ok] * np.cos(a[ok]), r[ok] * np.sin(a[ok])], axis=1)
+
+
+def fahrschlauch(xy, weg=None, halbe_breite=0.15, laenge=0.8):
+    """Naechster Gegenstand im FAHRSCHLAUCH: dem Streifen, den der Roboter ueberfaehrt, wenn er dem
+    Weg folgt (z. B. der Linie in eine Kurve hinein). Haeuser neben der Kurve stoeren so nicht.
+
+    xy: Punkte (punkte_xy), weg: [(x, y), ...] Punkte der Linie vor dem Roboter (Roboter-System)
+    oder None = geradeaus. Rueckgabe: None oder dict abstand (m entlang des Wegs), vor, seite (m, Mitte
+    im Roboter-System), breite (m), quer (m, seitlicher Abstand zur Wegmitte)."""
+    pfad = [(0.0, 0.0)] + [tuple(p) for p in (weg or []) if p[0] > 0.02]
+    if len(pfad) < 2:
+        pfad.append((laenge, 0.0))
+    pfad = np.array(pfad, dtype=np.float64)
+    # Weg bis 'laenge' gerade verlaengern (Kamera sieht nicht so weit)
+    seg = np.diff(pfad, axis=0)
+    seglen = np.hypot(seg[:, 0], seg[:, 1])
+    gesamt = seglen.sum()
+    if gesamt < laenge and seglen[-1] > 1e-6:
+        richtung = seg[-1] / seglen[-1]
+        pfad = np.vstack([pfad, pfad[-1] + richtung * (laenge - gesamt)])
+        seg = np.diff(pfad, axis=0)
+        seglen = np.hypot(seg[:, 0], seg[:, 1])
+    seglen = np.maximum(seglen, 1e-6)
+    kum = np.concatenate([[0.0], np.cumsum(seglen)])
+    if len(xy) == 0:
+        return None
+    p = np.asarray(xy, dtype=np.float64)[:, None, :]
+    a = pfad[None, :-1, :]
+    t = np.clip(((p - a) * seg[None]).sum(-1) / seglen[None] ** 2, 0.0, 1.0)
+    naechst = a + t[..., None] * seg[None]
+    dist = np.hypot(*(p - naechst).transpose(2, 0, 1))
+    j = np.argmin(dist, axis=1)
+    i = np.arange(len(xy))
+    quer, entlang = dist[i, j], kum[j] + t[i, j] * seglen[j]
+    drin = (quer < halbe_breite) & (entlang > 0.0) & (entlang <= laenge)
+    if not np.any(drin):
+        return None
+    xy, entlang, quer = np.asarray(xy)[drin], entlang[drin], quer[drin]
+    k = int(np.argmin(entlang))
+    teil = np.hypot(xy[:, 0] - xy[k, 0], xy[:, 1] - xy[k, 1]) < 0.04
+    return {'abstand': float(entlang[k]), 'vor': float(xy[k, 0]), 'seite': float(np.mean(xy[teil, 1])),
+            'breite': float(np.ptp(xy[teil, 1]) + 0.01), 'quer': float(quer[k])}

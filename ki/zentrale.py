@@ -8,7 +8,8 @@
 #                  + Farbe der gefundenen Ampel (welche Lampe leuchtet)
 #                  + Ersatz: LED-Erkennung und Achteck-Form, falls die KI die kleinen
 #                    Modell-Ampeln/Schilder nicht als solche erkennt
-#   LiDAR       -> Abstand nach vorne
+#   LiDAR       -> naechster Gegenstand im FAHRSCHLAUCH (Streifen entlang der Linie vor dem Roboter,
+#                  kommt vom Linienfolger; ohne Linie: geradeaus). Haeuser neben Kurven stoeren so nicht.
 #   Tiefenkamera-> ragt etwas aus dem Boden?
 # Die Entscheidung trifft ki/entscheider.py.
 #
@@ -92,6 +93,8 @@ class Zentrale(Node):
         dp('scan_front_deg', [0.0, 0.0])
         dp('obstacle_half_deg', 30.0)
         dp('obstacle_min_range', 0.08)
+        dp('fahrschlauch_breite', 0.30)  # Roboterbreite + etwas Rand (m) - am Roboter nachmessen
+        dp('fahrschlauch_laenge', 0.80)  # so weit voraus pruefen (m)
         dp('szenario', 'normal')
         for name in ('kamera_hoehe', 'kamera_neigung', 'kamera_fov', 'kamera_x', 'threshold'):
             dp(name, linie.STANDARD[name])   # gleiche Kameradaten wie der Linienfolger (config/roboter.yaml)
@@ -105,6 +108,7 @@ class Zentrale(Node):
         self.linien_sucher = linie.LinienSucher(self.kamera_cfg)   # Draufsicht fuer den Zebrastreifen
         self.gier, self.gier_zeit, self.imu_zeit = 0.0, time.time(), 0.0
         self.linie_status = {}
+        self.lidar_d, self.lidar_xy = None, None
 
         self.bridge = CvBridge()
         self.lock = threading.Lock()
@@ -167,11 +171,10 @@ class Zentrale(Node):
     def _scan(self, msg, topic, i):
         fronts = self.p('scan_front_deg')
         front = fronts[i] if i < len(fronts) else 0.0
-        d = lidar.naechster_vorne(msg, front, self.p('obstacle_half_deg'), self.p('obstacle_min_range'))
+        xy = lidar.punkte_xy(msg, front, self.p('obstacle_min_range'))
         breit = lidar.naechster_vorne(msg, front, 60.0, self.p('obstacle_min_range'))   # fuer Zebrastreifen
-        obj = lidar.naechstes_objekt(msg, front, self.p('obstacle_half_deg'), self.p('obstacle_min_range'))
         with self.lock:
-            self.scans[topic] = (time.time(), d, breit, obj)
+            self.scans[topic] = (time.time(), xy, breit)
 
     def _imu(self, msg):
         # Drehung um die Hochachse aufsummieren (fuer das Wenden)
@@ -190,7 +193,9 @@ class Zentrale(Node):
 
     def _linie(self, msg):
         try:
-            self.linie_status = json.loads(msg.data)
+            st = json.loads(msg.data)
+            st['_zeit'] = time.time()
+            self.linie_status = st
         except ValueError:
             pass
 
@@ -199,21 +204,32 @@ class Zentrale(Node):
             self.szenario = msg.data
             self._sende_ereignis(time.time(), f'Szenario: {msg.data}', 'info')
 
-    def lidar_abstand(self, breit=False):
-        jetzt = time.time()
-        with self.lock:
-            frisch = [(b if breit else d) for z, d, b, _ in self.scans.values() if jetzt - z < 1.0]
-        return min(frisch) if frisch else None
+    def weg_voraus(self):
+        """Linie vor dem Roboter vom Linienfolger (fuer den Fahrschlauch) oder None = geradeaus."""
+        st = self.linie_status
+        if time.time() - st.get('_zeit', 0.0) < 0.5 and st.get('weg'):
+            return st['weg']
+        return None
 
-    def lidar_objekt(self):
+    def lidar_pruefen(self):
+        """(Abstand im Fahrschlauch: m, inf = frei, None = keine LiDAR-Daten; Objekt oder None;
+        Abstand im breiten Bereich vorne fuer den Zebrastreifen)."""
         jetzt = time.time()
         with self.lock:
-            objekte = [o for z, _, _, o in self.scans.values() if jetzt - z < 1.0 and o]
+            frisch = [(xy, b) for z, xy, b in self.scans.values() if jetzt - z < 1.0]
+        if not frisch:
+            return None, None, None
+        self.lidar_xy = np.vstack([xy for xy, _ in frisch])   # alle Punkte (fuer den Zebrastreifen)
+        weg = self.weg_voraus()
+        objekte = [lidar.fahrschlauch(xy, weg, self.p('fahrschlauch_breite') / 2, self.p('fahrschlauch_laenge'))
+                   for xy, _ in frisch]
+        objekte = [o for o in objekte if o]
+        breit = min(b for _, b in frisch)
         if not objekte:
-            return None
+            return float('inf'), None, breit
         o = dict(min(objekte, key=lambda o: o['abstand']))
         o['quelle'] = 'lidar'
-        return o
+        return o['abstand'], o, breit
 
     # ---------------- Kamera auswerten (eigener Thread) ----------------
     def _ki_schleife(self):
@@ -261,7 +277,8 @@ class Zentrale(Node):
         form = None
         if not schild and self.p('form_ersatz'):
             form = schilder.finde_stoppschild(img, {})
-            if form['treffer'] is not None:
+            # erst halten, wenn das Schild nah ist (gleiche Regel wie bei der KI: Mindesthoehe im Bild)
+            if form['treffer'] is not None and form['treffer'][3] / h >= self.p('schild_min_hoehe'):
                 schild, schild_quelle = True, 'Form-Erkennung (Achteck)'
 
         # Kameramodell (Draufsicht, Tiefenkamera) stimmt nur, wenn der Arm in Fahrstellung steht
@@ -277,7 +294,7 @@ class Zentrale(Node):
             d = self.bridge.imgmsg_to_cv2(tmsg, 'passthrough').astype(np.float32)
             if tmsg.encoding != '32FC1':
                 d /= 1000.0  # Millimeter -> Meter
-            lid = self.lidar_abstand()
+            lid = self.lidar_d
             frei = (lid is None or lid >= self.entscheider.c['pruef_dist']) and self.entscheider.ablauf is None
             tiefe_hindernis, tiefe_obj = self.boden.pruefe(d, lernen=frei)
             if tiefe_obj:
@@ -339,14 +356,17 @@ class Zentrale(Node):
         jetzt = time.time()
         with self.lock:
             w = dict(self.wahrnehmung)
-        w['lidar'] = self.lidar_abstand()
-        w['lidar_breit'] = self.lidar_abstand(breit=True)
+        w['lidar'], lid_obj, w['lidar_breit'] = self.lidar_pruefen()
+        self.lidar_d = w['lidar']
+        w['lidar_xy'] = self.lidar_xy if w['lidar'] is not None else None
         w['gier'] = self.gier
         st = self.linie_status
-        w['linie'] = {'kamera': bool(st.get('linie_kamera')), 'quer': st.get('linie_quer')}
+        w['linie'] = {'kamera': bool(st.get('linie_kamera')), 'quer': st.get('linie_quer'), 'kurs': st.get('linie_kurs'),
+                      'kamera_quer': st.get('kamera_quer'), 'kamera_kurs': st.get('kamera_kurs')}
         # Hindernis fuer Aufheben/Anhalten: Tiefenkamera (sieht auch Flaches), sonst LiDAR
-        lid_obj = self.lidar_objekt()
-        w['objekt'] = w.get('tiefe_objekt') or (lid_obj if lid_obj and lid_obj['abstand'] < self.entscheider.c['pruef_dist'] else None)
+        if lid_obj and lid_obj['abstand'] >= self.entscheider.c['pruef_dist']:
+            lid_obj = None
+        w['objekt'] = w.get('tiefe_objekt') or lid_obj
         befehl = self.entscheider.update(jetzt, w, self.szenario)
         if befehl['arm'] and self.arm is not None:
             self._arm_befehl(befehl['arm'])
@@ -368,7 +388,9 @@ class Zentrale(Node):
                          'farbe': o.get('farbe')} for o in w['objekte']],
             'arm_erlaubt': self.arm is not None,
             'zebra': w.get('zebra'), 'einfahrt_verboten': w.get('einfahrt_verboten', False),
-            'objekt': w.get('objekt'), 'ablauf': self.entscheider.ablauf.name if self.entscheider.ablauf else None,
+            'kamera_ok': self.entscheider.arm_in_fahrstellung,   # Linienfolger: Bilder nur dann auswerten
+            'objekt': w.get('objekt'), 'weg': self.weg_voraus(), 'fahrschlauch': self.p('fahrschlauch_breite'),
+            'ablauf': self.entscheider.ablauf.name if self.entscheider.ablauf else None,
             'ablauf_phase': self.entscheider.ablauf.phase if self.entscheider.ablauf else None,
         })
         self.pub_befehl.publish(String(data=json.dumps(info)))

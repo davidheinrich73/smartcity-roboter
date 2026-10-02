@@ -72,7 +72,8 @@ pruefe('Person weg, LiDAR frei -> noch kurz warten', l.schritt(1), 'stopp')
 pruefe('nach 1 s frei -> weiter', l.schritt(10), 'fahren')
 pruefe('LiDAR + Tiefenkamera -> Stopp', l.schritt(1, lidar=0.3, tiefe_hindernis=True), 'stopp')
 l = Lauf()
-pruefe('LiDAR ohne Bestaetigung (Haus am Rand) -> langsam', l.schritt(3, lidar=0.3), 'langsam')
+pruefe('LiDAR ohne Bestaetigung -> langsam', l.schritt(3, lidar=0.3), 'langsam')
+pruefe('LiDAR ohne Bestaetigung, aber naeher als 20 cm -> halten', l.schritt(1, lidar=0.18), 'stopp')
 pruefe('NOTBREMSE unter 12 cm, ohne KI', l.schritt(1, lidar=0.10), 'stopp')
 pruefe('kein LiDAR -> Stopp', l.schritt(1, lidar=None), 'stopp')
 l = Lauf()
@@ -82,8 +83,9 @@ pruefe('KI-Bild veraltet -> Stopp',
 pruefe('Einsatz: Person im Weg -> trotzdem Stopp',
        Lauf().schritt(1, szenario='einsatz', objekte=[{'name': 'Person', 'im_weg': True}]), 'stopp')
 
-# Arm-Blick (nur wenn erlaubt)
-l = Lauf(arm_erlaubt=True)
+# Arm-Blick (nur wenn erlaubt und die Pose 'pruefblick' eingelernt ist)
+PRUEF = {'fahrstellung': [90, 120, 10, 20, 90, 30], 'pruefblick': [90, 100, 20, 30, 90, 30]}
+l = Lauf(arm_erlaubt=True, posen=PRUEF)
 pruefe('unklar (1,5 s) -> Arm in Pruefblick', l.bis('pruefblick', lidar=0.3), 'stopp', 'pruefblick')
 t0 = l.t
 pruefe('Arm faehrt hin', l.schritt(10, lidar=0.3), 'stopp')
@@ -93,7 +95,7 @@ print(f'     (Arm-Blick dauerte {l.t - t0:.1f} s bis zum Zurueckfahren)')
 pruefe('Arm noch unterwegs -> Stopp', l.schritt(5, lidar=0.3), 'stopp')
 pruefe('Arm zurueck, nichts gefunden -> langsam', l.schritt(12, lidar=0.3), 'langsam')
 pruefe('kein zweites Umschauen fuer dieselbe Meldung', l.schritt(30, lidar=0.3), 'langsam', None)
-l = Lauf(arm_erlaubt=True)
+l = Lauf(arm_erlaubt=True, posen=PRUEF)
 l.bis('pruefblick', lidar=0.3)
 l.schritt(5, lidar=0.3)
 pruefe('Notbremse waehrend Arm-Blick', l.schritt(1, lidar=0.1), 'stopp')
@@ -101,6 +103,8 @@ pruefe('danach frei -> Arm zuerst zurueck', l.schritt(1, lidar=1.0), 'stopp', 'f
 pruefe('waehrend Arm zurueckfaehrt -> noch Stopp', l.schritt(5, lidar=1.0), 'stopp')
 pruefe('danach weiter', l.schritt(20, lidar=1.0), 'fahren')
 pruefe('ohne Erlaubnis kein Arm', Lauf().schritt(40, lidar=0.3), 'langsam', None)
+pruefe('ohne Pose "pruefblick" kein Arm-Blick', Lauf(arm_erlaubt=True, posen={'fahrstellung': PRUEF['fahrstellung']})
+       .schritt(40, lidar=0.3), 'langsam', None)
 
 # ---------------- Zebrastreifen ----------------
 POSEN = {'fahrstellung': [90, 120, 10, 20, 90, 30], 'pruefblick': [90, 100, 20, 30, 90, 30],
@@ -141,6 +145,20 @@ ok = arme == [] and b['aktion'] == 'stopp'
 fehler += not ok
 print(f"{'OK  ' if ok else 'FEHLER'} ohne Arm-Freigabe: kein Arm, etwas auf dem Zebrastreifen -> wartet ({b['grund']})")
 pruefe('ohne Arm, frei -> weiter', l.schritt(80, zebra={'abstand': 0.3}), 'fahren')
+# LiDAR-Punkte: nur der Bereich am Zebrastreifen zaehlt (Haus/Wand daneben nicht)
+import numpy as np  # noqa: E402
+wand = np.array([[0.3 + 0.02 * k, -0.40] for k in range(20)])       # 40 cm rechts: Wand/Haus
+fussgaenger = np.array([[0.36, -0.20], [0.37, -0.21]])               # wartet rechts am Zebrastreifen
+l = Lauf(arm_erlaubt=True, posen=POSEN)
+l.schritt(1, zebra={'abstand': 0.3}, lidar_xy=wand)
+arme, b = arm_befehle(l, 80, zebra={'abstand': 0.3}, lidar_xy=wand)
+pruefe('nur Wand neben der Strasse -> weiter', b, 'fahren')
+l = Lauf(arm_erlaubt=True, posen=POSEN)
+l.schritt(1, zebra={'abstand': 0.3}, lidar_xy=np.vstack([wand, fussgaenger]))
+arme, b = arm_befehle(l, 80, zebra={'abstand': 0.3}, lidar_xy=np.vstack([wand, fussgaenger]))
+pruefe('Fussgaenger am Zebrastreifen (LiDAR) -> wartet', b, 'stopp')
+arme, b = arm_befehle(l, 120, zebra={'abstand': 0.3}, lidar_xy=wand)
+pruefe('Fussgaenger weg -> weiter', b, 'fahren')
 
 # ---------------- Einbahnstrasse ----------------
 l = Lauf()
@@ -150,9 +168,17 @@ b = l.schritt(10, gier=0.0)
 ok = b['aktion'] == 'manoever' and b['manoever']['dreh'] > 0
 fehler += not ok
 print(f"{'OK  ' if ok else 'FEHLER'} dreht auf der Stelle: {b['grund']}")
-pruefe('nach 100 Grad noch nicht fertig', l.schritt(1, gier=math.radians(100), linie={'kamera': True, 'quer': 0.0}), 'manoever')
-pruefe('160 Grad + Linie vorne -> fertig, faehrt', l.schritt(1, gier=math.radians(160), linie={'kamera': True, 'quer': 0.01}), 'fahren')
-pruefe('Schild noch sichtbar -> nicht nochmal wenden', l.schritt(5, gier=math.radians(160), einfahrt_verboten=True), 'fahren')
+VORNE = {'kamera': True, 'kamera_quer': 0.01, 'kamera_kurs': 0.05}
+pruefe('nach 100 Grad noch nicht fertig', l.schritt(1, gier=math.radians(100), linie=VORNE), 'manoever')
+pruefe('160 Grad, Linie noch schraeg (40 Grad) -> weiter drehen',
+       l.schritt(1, gier=math.radians(160), linie=dict(VORNE, kamera_kurs=math.radians(40))), 'manoever')
+pruefe('170 Grad + Linie mittig vorne -> fertig, faehrt', l.schritt(1, gier=math.radians(170), linie=VORNE), 'fahren')
+l = Lauf()
+l.schritt(2, einfahrt_verboten=True)
+l.schritt(10, gier=0.0)
+pruefe('Gedaechtnis: 170 Grad, Linie unter dem Roboter gerade -> fertig',
+       l.schritt(1, gier=math.radians(170), linie={'kamera': False, 'quer': 0.01, 'kurs': 0.1}), 'fahren')
+pruefe('Schild noch sichtbar -> nicht nochmal wenden', l.schritt(5, gier=math.radians(170), einfahrt_verboten=True), 'fahren')
 
 # ---------------- Aufheben ----------------
 WUERFEL = {'vor': 0.31, 'seite': 0.02, 'breite': 0.045, 'hoehe': 0.045, 'quelle': 'tiefe'}

@@ -10,6 +10,8 @@
 # w = Wahrnehmung (siehe ki/entscheider.py).
 import math
 
+import numpy as np
+
 LEBEWESEN = {'Person', 'Hund', 'Katze', 'Pferd', 'Vogel', 'Schaf', 'Kuh', 'Teddy'}
 
 
@@ -39,18 +41,30 @@ class Zebrastreifen(Ablauf):
     """Vor dem Zebrastreifen anhalten, umschauen, erst weiterfahren wenn niemand kommt."""
     name = 'zebra'
 
-    def __init__(self, jetzt, c, posen):
+    def __init__(self, jetzt, c, posen, abstand=0.3):
         super().__init__(jetzt, c)
         self.mit_arm = bool(posen.get('blick_links') and posen.get('blick_rechts') and posen.get('fahrstellung'))
+        self.abstand = abstand      # Zebrastreifen so weit voraus (m), gemessen beim Anhalten
         self.jemand = False
         self.runde = 0
         self._phase(jetzt, 'halt')
 
     def _beobachten(self, w):
-        # Personen/Tiere irgendwo im Bild (nicht nur im Weg) oder etwas Grosses auf/an dem Zebrastreifen
+        # Personen/Tiere irgendwo im Bild (nicht nur im Weg) ...
         if any(o['name'] in LEBEWESEN for o in w.get('objekte', [])):
             self.jemand = 'Person gesehen'
-        if w.get('lidar_breit') is not None and w['lidar_breit'] < self.c['zebra_lidar']:
+        # ... oder der LiDAR sieht etwas AUF oder direkt NEBEN dem Zebrastreifen (wartender Fussgaenger).
+        # Nur dieser Bereich zaehlt, damit Haeuser und Waende nicht als Fussgaenger gelten.
+        xy = w.get('lidar_xy')
+        if xy is not None:
+            xy = np.asarray(xy).reshape(-1, 2)
+            zone = ((xy[:, 0] > self.abstand - 0.10) & (xy[:, 0] < self.abstand + self.c['zebra_tiefe'])
+                    & (np.abs(xy[:, 1]) < self.c['zebra_seite']))
+            if zone.any():
+                x, y = xy[zone][np.argmin(xy[zone][:, 0])]
+                seite = 'links' if y > 0 else 'rechts'
+                self.jemand = f'etwas am Zebrastreifen, {abs(y) * 100:.0f} cm {seite} (LiDAR)'
+        elif w.get('lidar_breit') is not None and w['lidar_breit'] < self.c['zebra_lidar']:
             self.jemand = f"etwas {w['lidar_breit'] * 100:.0f} cm vor mir (LiDAR)"
 
     def schritt(self, jetzt, w):
@@ -119,7 +133,13 @@ class Wenden(Ablauf):
             return befehl('stopp', 'Einfahrt verboten -> wende')
         gedreht = abs(w.get('gier', self.gier0) - self.gier0)
         linie = w.get('linie') or {}
-        linie_vorne = linie.get('kamera') and linie.get('quer') is not None and abs(linie['quer']) < 0.06
+        # Linie wieder vorne: Roboter steht auf ihr und schaut (fast) in ihre Richtung.
+        # Zuerst nach dem Linien-Gedaechtnis (kennt auch das Stueck direkt unter/hinter dem Roboter),
+        # sonst nach dem Kamerabild.
+        def passt(quer, kurs):
+            return quer is not None and kurs is not None and abs(quer) < 0.06 and abs(kurs) < math.radians(20)
+        linie_vorne = passt(linie.get('quer'), linie.get('kurs')) or (
+            linie.get('kamera') and passt(linie.get('kamera_quer'), linie.get('kamera_kurs')))
         if (gedreht >= math.radians(150) and linie_vorne) or gedreht >= math.radians(215):
             self.ereignisse.append((f'Gewendet ({math.degrees(gedreht):.0f} Grad)', 'fahren'))
             self.ergebnis = 'ok'
