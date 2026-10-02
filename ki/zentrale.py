@@ -17,8 +17,11 @@
 #   /ki/befehl              std_msgs/String  JSON {aktion, faktor, grund, ...}  (10x pro Sekunde)
 #   /ki/ereignis            std_msgs/String  JSON {zeit, text, art}
 #   /ki/bild/compressed     Kamerabild mit allem, was die KI sieht (fuer das Panel)
+#   /ki/antwort             std_msgs/String  Antwort auf /ki/kommando
 # Empfaengt:
 #   /ki/szenario            std_msgs/String  'normal' | 'einsatz'
+#   /ki/kommando            std_msgs/String  'umschauen' (Kartograf/Panel: kurz anhalten, links/rechts schauen)
+#   /arm6_joints            wohin der Arm geschickt wurde (von wem auch immer) -> wohin schaut die Kamera?
 import json
 import os
 import signal
@@ -104,6 +107,7 @@ class Zentrale(Node):
         arm_erlaubt = bool(einst.get('ki_darf_arm_bewegen')) and bool(self.posen.get('fahrstellung'))
         self.entscheider = Entscheider(arm_erlaubt=arm_erlaubt, posen=self.posen)
         self.arm = armlib.Arm(self) if arm_erlaubt else None
+        self.arm_beobachter = armlib.ArmBeobachter(self)
         self.kamera_cfg = {n: self.p(n) for n in ('kamera_hoehe', 'kamera_neigung', 'kamera_fov', 'kamera_x', 'threshold')}
         self.linien_sucher = linie.LinienSucher(self.kamera_cfg)   # Draufsicht fuer den Zebrastreifen
         self.gier, self.gier_zeit, self.imu_zeit = 0.0, time.time(), 0.0
@@ -144,6 +148,8 @@ class Zentrale(Node):
             self.create_subscription(LaserScan, t, lambda m, t=t, i=i: self._scan(m, t, i),
                                      qos_profile_sensor_data)
         self.create_subscription(String, '/ki/szenario', self._szenario, 10)
+        self.create_subscription(String, '/ki/kommando', self._kommando, 10)
+        self.pub_antwort = self.create_publisher(String, '/ki/antwort', 10)
         self.create_subscription(Imu, '/imu/data_raw', self._imu, qos_profile_sensor_data)
         self.create_subscription(Twist, '/cmd_vel', self._cmd, 10)
         self.create_subscription(String, '/line_follower/status', self._linie, 10)
@@ -203,6 +209,18 @@ class Zentrale(Node):
         if msg.data in ('normal', 'einsatz') and msg.data != self.szenario:
             self.szenario = msg.data
             self._sende_ereignis(time.time(), f'Szenario: {msg.data}', 'info')
+
+    def _kommando(self, msg):
+        antwort = self.entscheider.kommando(time.time(), msg.data.strip())
+        self.get_logger().info(f'Kommando {msg.data}: {antwort}')
+        self.pub_antwort.publish(String(data=antwort))
+
+    def kamera_lage(self):
+        """(ok, gier): ok = Kamera schaut normal nach vorne (Draufsicht, Linie, Tiefe stimmen),
+        gier = Drehung (Grad) des Arms gegenueber der Fahrstellung oder None (unbekannt / Arm faehrt)."""
+        fahr, gier = self.arm_beobachter.kamera(self.posen, time.time())
+        ok = fahr and self.entscheider.arm_in_fahrstellung
+        return ok, (0.0 if ok else gier)
 
     def weg_voraus(self):
         """Linie vor dem Roboter vom Linienfolger (fuer den Fahrschlauch) oder None = geradeaus."""
@@ -282,7 +300,7 @@ class Zentrale(Node):
                 schild, schild_quelle = True, 'Form-Erkennung (Achteck)'
 
         # Kameramodell (Draufsicht, Tiefenkamera) stimmt nur, wenn der Arm in Fahrstellung steht
-        fahrstellung = self.entscheider.arm_in_fahrstellung
+        fahrstellung = self.kamera_lage()[0]
         einfahrt = schilder.finde_einfahrt_verboten(img) if fahrstellung else None
         zebra, vogel = None, None
         if fahrstellung:
@@ -296,7 +314,7 @@ class Zentrale(Node):
                 d /= 1000.0  # Millimeter -> Meter
             lid = self.lidar_d
             frei = (lid is None or lid >= self.entscheider.c['pruef_dist']) and self.entscheider.ablauf is None
-            tiefe_hindernis, tiefe_obj = self.boden.pruefe(d, lernen=frei)
+            tiefe_hindernis, tiefe_obj = self.boden.pruefe(d, lernen=frei, linie_voraus=self.weg_voraus())
             if tiefe_obj:
                 tiefe_obj['quelle'] = 'tiefe'
 
@@ -375,6 +393,7 @@ class Zentrale(Node):
         for zeit, text, art in self.entscheider.ereignisse:
             self._sende_ereignis(zeit, text, art)
         self.entscheider.ereignisse.clear()
+        kamera_ok, kamera_gier = self.kamera_lage()
         info = dict(befehl)
         info.update({
             'zeit': jetzt, 'szenario': self.szenario,
@@ -388,7 +407,7 @@ class Zentrale(Node):
                          'farbe': o.get('farbe')} for o in w['objekte']],
             'arm_erlaubt': self.arm is not None,
             'zebra': w.get('zebra'), 'einfahrt_verboten': w.get('einfahrt_verboten', False),
-            'kamera_ok': self.entscheider.arm_in_fahrstellung,   # Linienfolger: Bilder nur dann auswerten
+            'kamera_ok': kamera_ok, 'kamera_gier': kamera_gier,   # Linienfolger/Kartograf: wohin schaut die Kamera?
             'objekt': w.get('objekt'), 'weg': self.weg_voraus(), 'fahrschlauch': self.p('fahrschlauch_breite'),
             'ablauf': self.entscheider.ablauf.name if self.entscheider.ablauf else None,
             'ablauf_phase': self.entscheider.ablauf.phase if self.entscheider.ablauf else None,

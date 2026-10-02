@@ -5,6 +5,8 @@
 # wo er im Raum liegt: x vorne, y links, z = Hoehe ueber dem Boden. Boden = 0 cm.
 # Was mehr als 'min_hoehe' herausragt und im Fahrweg liegt, ist ein Hindernis -
 # auch Dinge UNTER der LiDAR-Ebene (z. B. ein kleiner Holzwuerfel).
+# Fahrweg = Streifen entlang der Linie vor dem Roboter (wie beim LiDAR-Fahrschlauch), in Kurven also
+# gebogen. Ohne bekannte Linie: gerade nach vorne.
 #
 # Kameradaten sind nie ganz genau. Darum lernt das Modell, solange der Weg frei ist, fuer jede
 # Bildzeile, wie hoch der Boden "scheinbar" liegt, und zieht das spaeter ab.
@@ -13,6 +15,8 @@
 import math
 
 import numpy as np
+
+from lidar import abstand_zum_weg
 
 STANDARD = {
     'min_hoehe': 0.02,       # hoeher als das ueber dem Boden = Hindernis (m)
@@ -59,9 +63,10 @@ class Bodenmodell:
         z = self.k['kamera_hoehe'] + t * rz
         return x, y, z
 
-    def pruefe(self, tiefe_m, lernen):
+    def pruefe(self, tiefe_m, lernen, linie_voraus=None):
         """Rueckgabe: (hindernis True/False oder None = noch nicht bereit, objekt-dict oder None).
-        objekt: vor (m, naechster Punkt), seite (m, Mitte), breite (m), hoehe (m), punkte (Anzahl)."""
+        objekt: vor (m, naechster Punkt), seite (m, Mitte), breite (m), hoehe (m), punkte (Anzahl).
+        linie_voraus: Linie vor dem Roboter [(x, y), ...] (vom Linienfolger) -> Fahrweg folgt ihr."""
         x, y, z = self.punkte(tiefe_m)
         weg = (x > 0.05) & (x < self.c['weg_laenge']) & (np.abs(y) < self.c['weg_breite'])
         if lernen:
@@ -75,6 +80,14 @@ class Bodenmodell:
         if self.gelernt < self.c['lern_bilder']:
             return None, None
         hoch = (z - self.korrektur[:, None]) > self.c['min_hoehe']
+        if linie_voraus:
+            # Fahrweg entlang der Linie: nur die herausragenden Punkte pruefen (wenige, schnell)
+            kand = hoch & np.isfinite(z) & (x > 0.05) & (np.hypot(x, y) < self.c['weg_laenge'] + 0.1)
+            weg = np.zeros_like(kand)
+            if kand.any():
+                quer, entlang = abstand_zum_weg(np.column_stack([x[kand], y[kand]]), linie_voraus,
+                                                self.c['weg_laenge'])
+                weg[kand] = (quer < self.c['weg_breite']) & (entlang < self.c['weg_laenge'])
         treffer = weg & hoch & np.isfinite(z)
         n = int(treffer.sum())
         if n < self.c['min_punkte']:

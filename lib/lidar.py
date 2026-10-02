@@ -66,13 +66,10 @@ def punkte_xy(msg, front_deg=0.0, min_abstand=0.08):
     return np.stack([r[ok] * np.cos(a[ok]), r[ok] * np.sin(a[ok])], axis=1)
 
 
-def fahrschlauch(xy, weg=None, halbe_breite=0.15, laenge=0.8):
-    """Naechster Gegenstand im FAHRSCHLAUCH: dem Streifen, den der Roboter ueberfaehrt, wenn er dem
-    Weg folgt (z. B. der Linie in eine Kurve hinein). Haeuser neben der Kurve stoeren so nicht.
-
-    xy: Punkte (punkte_xy), weg: [(x, y), ...] Punkte der Linie vor dem Roboter (Roboter-System)
-    oder None = geradeaus. Rueckgabe: None oder dict abstand (m entlang des Wegs), vor, seite (m, Mitte
-    im Roboter-System), breite (m), quer (m, seitlicher Abstand zur Wegmitte)."""
+def abstand_zum_weg(xy, weg=None, laenge=0.8):
+    """Fuer jeden Punkt (N,2): seitlicher Abstand zum Weg und Strecke entlang des Wegs bis dorthin.
+    weg: [(x, y), ...] Punkte der Linie vor dem Roboter (Roboter-System) oder None = geradeaus.
+    Rueckgabe: (quer, entlang) als numpy-Arrays (m)."""
     pfad = [(0.0, 0.0)] + [tuple(p) for p in (weg or []) if p[0] > 0.02]
     if len(pfad) < 2:
         pfad.append((laenge, 0.0))
@@ -88,16 +85,26 @@ def fahrschlauch(xy, weg=None, halbe_breite=0.15, laenge=0.8):
         seglen = np.hypot(seg[:, 0], seg[:, 1])
     seglen = np.maximum(seglen, 1e-6)
     kum = np.concatenate([[0.0], np.cumsum(seglen)])
-    if len(xy) == 0:
-        return None
-    p = np.asarray(xy, dtype=np.float64)[:, None, :]
+    p = np.asarray(xy, dtype=np.float64).reshape(-1, 2)[:, None, :]
     a = pfad[None, :-1, :]
     t = np.clip(((p - a) * seg[None]).sum(-1) / seglen[None] ** 2, 0.0, 1.0)
     naechst = a + t[..., None] * seg[None]
     dist = np.hypot(*(p - naechst).transpose(2, 0, 1))
     j = np.argmin(dist, axis=1)
-    i = np.arange(len(xy))
-    quer, entlang = dist[i, j], kum[j] + t[i, j] * seglen[j]
+    i = np.arange(p.shape[0])
+    return dist[i, j], kum[j] + t[i, j] * seglen[j]
+
+
+def fahrschlauch(xy, weg=None, halbe_breite=0.15, laenge=0.8):
+    """Naechster Gegenstand im FAHRSCHLAUCH: dem Streifen, den der Roboter ueberfaehrt, wenn er dem
+    Weg folgt (z. B. der Linie in eine Kurve hinein). Haeuser neben der Kurve stoeren so nicht.
+
+    xy: Punkte (punkte_xy), weg: [(x, y), ...] Punkte der Linie vor dem Roboter (Roboter-System)
+    oder None = geradeaus. Rueckgabe: None oder dict abstand (m entlang des Wegs), vor, seite (m, Mitte
+    im Roboter-System), breite (m), quer (m, seitlicher Abstand zur Wegmitte)."""
+    if len(xy) == 0:
+        return None
+    quer, entlang = abstand_zum_weg(xy, weg, laenge)
     drin = (quer < halbe_breite) & (entlang > 0.0) & (entlang <= laenge)
     if not np.any(drin):
         return None
