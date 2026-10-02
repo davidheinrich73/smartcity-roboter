@@ -37,6 +37,8 @@
 
 Im Szenario **RTW-Einsatz** werden 8 und 9 übergangen (Sonderrechte), alles andere gilt weiter.
 
+**Werte ändern:** Alle Zahlen aus `ki/entscheider.py` (`STANDARD`) sind Einstellungen der KI-Zentrale. Man trägt sie in `config/lokal/roboter.yaml` unter `ki_zentrale:` → `ros__parameters:` ein, z. B. `zebra_halt: 0.30`, und startet die KI neu.
+
 **Fahrschlauch:** Der Linienfolger meldet, wo die Linie vor dem Roboter verläuft. Die KI prüft nur den Streifen von **30 cm Breite** (`fahrschlauch_breite`, Roboterbreite + Rand, **nachmessen**) entlang dieser Linie. Dasselbe gilt für die Tiefenkamera. Früher war es ein gerader Kegel nach vorne. Dann hielt er in jeder Kurve vor Häusern am Rand, und in einer Kurve hielt die Tiefenkamera einen Fußgänger am Straßenrand für ein Hindernis.
 
 **Warum hat die Notbremse unter 12 cm das letzte Wort und nicht die KI?** Die KI kennt nur 80 Dinge. Einen Schuh, ein Kabel oder einen Karton kennt sie nicht. Darum: ganz nah = sofort stopp.

@@ -49,7 +49,7 @@ from zebra import finde_zebra  # noqa: E402
 import lidar          # noqa: E402
 import arm as armlib  # noqa: E402
 from tiefe import Bodenmodell        # noqa: E402
-from entscheider import Entscheider  # noqa: E402
+from entscheider import Entscheider, STANDARD as KI_STANDARD  # noqa: E402
 
 # Diese Dinge fuehren zum Anhalten, wenn sie im Weg sind
 STOPP_NAMEN = ['Person', 'Fahrrad', 'Auto', 'Motorrad', 'Bus', 'LKW', 'Hund', 'Katze', 'Teddy',
@@ -101,11 +101,16 @@ class Zentrale(Node):
         dp('szenario', 'normal')
         for name in ('kamera_hoehe', 'kamera_neigung', 'kamera_fov', 'kamera_x', 'threshold'):
             dp(name, linie.STANDARD[name])   # gleiche Kameradaten wie der Linienfolger (config/roboter.yaml)
+        # Alle Werte des Entscheiders (ki/entscheider.py, STANDARD) sind auch einstellbar, z. B. in
+        # config/lokal/roboter.yaml unter ki_zentrale: ros__parameters: greif_abstand: 0.22
+        for name, wert in KI_STANDARD.items():
+            dp(name, wert)
 
         einst = armlib.lade_einstellungen()
         self.posen = {k: v for k, v in armlib.lade_posen().items() if v}
         arm_erlaubt = bool(einst.get('ki_darf_arm_bewegen')) and bool(self.posen.get('fahrstellung'))
-        self.entscheider = Entscheider(arm_erlaubt=arm_erlaubt, posen=self.posen)
+        self.entscheider = Entscheider(cfg={n: self.p(n) for n in KI_STANDARD}, arm_erlaubt=arm_erlaubt,
+                                       posen=self.posen)
         self.arm = armlib.Arm(self) if arm_erlaubt else None
         self.arm_beobachter = armlib.ArmBeobachter(self)
         self.kamera_cfg = {n: self.p(n) for n in ('kamera_hoehe', 'kamera_neigung', 'kamera_fov', 'kamera_x', 'threshold')}

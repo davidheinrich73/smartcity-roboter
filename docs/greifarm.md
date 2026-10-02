@@ -55,6 +55,16 @@ Quelle: ein öffentlicher Treiber für den M3 Pro ([strands-labs/robots, Pull Re
 
   Immer nur **im Stand** und nur, solange das Fahrprogramm **fährt** (nicht im TEST, nicht nach STOPP).
 
+**Abstand zum Greifen einstellen:** In der Pose "Greifen" Würfel von Hand mittig zwischen die Backen legen, Abstand Robotermitte → Würfelmitte messen und eintragen in `config/lokal/roboter.yaml` (Datei anlegen, falls es sie nicht gibt):
+
+```yaml
+ki_zentrale:
+  ros__parameters:
+    greif_abstand: 0.22
+```
+
+Genauso lassen sich alle Werte aus `ki/entscheider.py` (`STANDARD`) einstellen, z. B. `ausricht_abstand`, `anfahr_tempo` oder `zebra_halt`. Danach die KI neu starten.
+
 ## Aufheben (KI, ki/ablaeufe.py)
 
 1. Tiefenkamera (oder LiDAR + Tiefenkamera) meldet etwas Kleines **mitten auf der Fahrbahn**.
