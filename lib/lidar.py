@@ -42,3 +42,18 @@ def punkte(msg, front_deg=0.0, max_punkte=360):
         a, r = a[::schritt], r[::schritt]
     x, y = r * np.cos(a), r * np.sin(a)
     return [[round(float(px), 3), round(float(py), 3)] for px, py in zip(x, y)]
+
+
+def naechstes_objekt(msg, front_deg=0.0, halb_deg=30.0, min_abstand=0.08):
+    """Naechster Gegenstand vorne: dict vor, seite (m, Mitte), breite (m) oder None.
+    Breite = Punkte, die hoechstens 4 cm hinter dem naechsten Punkt liegen."""
+    a, r = winkel_und_abstand(msg, front_deg)
+    im_sektor = (np.abs(a) <= math.radians(halb_deg)) & (r > min_abstand)
+    if not np.any(im_sektor):
+        return None
+    a, r = a[im_sektor], r[im_sektor]
+    i = int(np.argmin(r))
+    x, y = r * np.cos(a), r * np.sin(a)
+    teil = np.hypot(x - x[i], y - y[i]) < 0.04
+    return {'vor': float(x[i]), 'seite': float(np.mean(y[teil])),
+            'breite': float(np.ptp(y[teil]) + 0.01), 'abstand': float(r[i])}

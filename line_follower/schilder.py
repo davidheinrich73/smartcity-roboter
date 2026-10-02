@@ -9,6 +9,7 @@
 import math
 
 import cv2
+import numpy as np
 
 STANDARD = {
     'sign_top': 0.0,         # Suchbereich oben (Anteil Bildhoehe)
@@ -63,6 +64,47 @@ def finde_stoppschild(img, cfg):
             bester = flaeche
             erg['treffer'] = (x, y0 + y, bw, bh)
     return erg
+
+
+def finde_einfahrt_verboten(img, cfg=None):
+    """Schild "Verbot der Einfahrt" (Einbahnstrasse von der falschen Seite):
+    roter KREIS mit weissem waagrechtem Balken in der Mitte.
+    Rueckgabe: (x, y, b, h) oder None."""
+    c = dict(STANDARD)
+    c.update(cfg or {})
+    h, w = img.shape[:2]
+    y0, y1 = int(h * c['sign_top']), int(h * c['sign_bottom'])
+    part = img[y0:y1]
+    if part.size == 0:
+        return None
+    hsv = cv2.cvtColor(part, cv2.COLOR_BGR2HSV)
+    s, v = int(c['sign_sat_min']), int(c['sign_val_min'])
+    rot = cv2.inRange(hsv, (0, s, v), (10, 255, 255)) | cv2.inRange(hsv, (170, s, v), (180, 255, 255))
+    rot = cv2.morphologyEx(rot, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)))
+    weiss = cv2.inRange(hsv, (0, 0, 170), (180, 70, 255))
+    contours, _ = cv2.findContours(rot, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    bester = None
+    for cnt in contours:
+        flaeche = cv2.contourArea(cnt)
+        if flaeche < c['sign_min_area'] * 0.6:
+            continue
+        (cx, cy), r = cv2.minEnclosingCircle(cnt)
+        if flaeche / (math.pi * r * r) < c['sign_max_round']:
+            continue                                   # nicht rund genug (z. B. Achteck = Stoppschild)
+        kreis = np.zeros(rot.shape, np.uint8)
+        cv2.circle(kreis, (int(cx), int(cy)), int(r * 0.85), 255, -1)
+        innen = cv2.bitwise_and(weiss, kreis)
+        pts = cv2.findNonZero(innen)
+        if pts is None:
+            continue
+        bx, by, bw, bh = cv2.boundingRect(pts)
+        gefuellt = cv2.countNonZero(innen) / max(1, bw * bh)
+        mittig = abs(by + bh / 2 - cy) < 0.2 * r
+        if bw >= 1.0 * r and bw / max(1, bh) >= 2.5 and gefuellt >= 0.6 and mittig:
+            x, y, ww, hh = cv2.boundingRect(cnt)
+            if bester is None or ww * hh > bester[2] * bester[3]:
+                bester = (x, y0 + y, ww, hh)
+    return bester
 
 
 def zeichne(view, erg):
