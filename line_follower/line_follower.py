@@ -62,6 +62,7 @@ class LineFollower(Node):
         dp('publish_image', True)   # Bild mit Linie fuers Panel senden
         dp('image_topic', '/camera/color/image_raw')
         dp('rate', 20.0)            # Fahrbefehle pro Sekunde (Board-Watchdog: 0,3 s)
+        dp('max_bild_hz', 15.0)     # hoechstens so viele Kamerabilder/s auswerten (spart Rechenzeit)
         dp('ki_pflicht', True)      # ohne Befehl der KI-Zentrale nicht fahren
         dp('speed', 0.15)           # m/s auf gerader Strecke (in Kurven automatisch langsamer)
         dp('direction', 1.0)        # -1.0 = rueckwaerts fahren (Kamera schaut trotzdem nach vorne!)
@@ -98,13 +99,14 @@ class LineFollower(Node):
         # Kamera in eigener Gruppe: eine langsame Bildauswertung blockiert nie die Fahrbefehle
         bild_gruppe = MutuallyExclusiveCallbackGroup()
         rest_gruppe = MutuallyExclusiveCallbackGroup()
+        scan_gruppe = MutuallyExclusiveCallbackGroup()   # LiDAR eigene Gruppe: kommt nie zu spaet
         nur_neuestes = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT,
                                   history=HistoryPolicy.KEEP_LAST)
         self.create_subscription(Image, self.p('image_topic'), self.on_image, nur_neuestes,
                                  callback_group=bild_gruppe)
         for i, t in enumerate(self.p('scan_topics')):
             self.create_subscription(LaserScan, t, lambda m, t=t, i=i: self.on_scan(m, t, i),
-                                     qos_profile_sensor_data, callback_group=rest_gruppe)
+                                     qos_profile_sensor_data, callback_group=scan_gruppe)
         self.create_subscription(String, '/ki/befehl', self.on_ki, 10, callback_group=rest_gruppe)
         self.create_subscription(Float32, '/line_follower/tempo', self.on_tempo, 10, callback_group=rest_gruppe)
         self.pub = self.create_publisher(Twist, '/cmd_vel', 10)
@@ -152,7 +154,10 @@ class LineFollower(Node):
         jetzt = time.time()
         frisch = [(t, d) for t, (z, d) in self.scans.items() if jetzt - z < 1.0]
         if not frisch:
-            return 'KEIN LIDAR (obstacle_check:=false zum Abschalten)'
+            if not self.scans:
+                return 'KEIN LIDAR: noch nie ein Scan angekommen (obstacle_check:=false zum Abschalten)'
+            alter = min(jetzt - z for z, _ in self.scans.values())
+            return f'KEIN LIDAR: letzter Scan vor {alter:.1f} s'
         t, d = min(frisch, key=lambda x: x[1])
         if d < self.p('notbremse_dist'):
             return f'NOTBREMSE {d * 100:.0f} cm ({t})'
@@ -160,8 +165,10 @@ class LineFollower(Node):
 
     # ---------------- Kamera: Linie suchen ----------------
     def on_image(self, msg):
-        img = self.bridge.imgmsg_to_cv2(msg, 'bgr8')
         jetzt = time.time()
+        if jetzt - self.bild_zeit < 1.0 / self.p('max_bild_hz') - 0.005:
+            return                    # Bild auslassen: entlastet den Rechner (Kamera liefert ~30/s)
+        img = self.bridge.imgmsg_to_cv2(msg, 'bgr8')
         # Schaut die Kamera gerade woanders hin (KI dreht den Arm zum Umschauen/Greifen)? Dann passt die
         # Umrechnung auf den Boden nicht -> Bild nicht ins Linien-Gedaechtnis (Roboter steht dabei).
         ki_zeit, ki = self.ki
@@ -306,7 +313,7 @@ def main():
         rclpy.shutdown()
         sys.exit(1)
     node = LineFollower()
-    executor = MultiThreadedExecutor(num_threads=3)
+    executor = MultiThreadedExecutor(num_threads=4)
     executor.add_node(node)
     threading.Thread(target=executor.spin, daemon=True).start()
     try:
