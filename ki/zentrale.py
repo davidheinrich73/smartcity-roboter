@@ -239,8 +239,8 @@ class Zentrale(Node):
             return None, None, None
         self.lidar_xy = np.vstack([xy for xy, _ in frisch])   # alle Punkte (fuer den Zebrastreifen)
         weg = self.weg_voraus()
-        objekte = [lidar.fahrschlauch(xy, weg, self.p('fahrschlauch_breite') / 2, self.p('fahrschlauch_laenge'))
-                   for xy, _ in frisch]
+        objekte = [lidar.fahrschlauch(xy, weg, self.p('fahrschlauch_breite') / 2, self.p('fahrschlauch_laenge'),
+                                      nah_halb_deg=self.p('obstacle_half_deg')) for xy, _ in frisch]
         objekte = [o for o in objekte if o]
         breit = min(b for _, b in frisch)
         if not objekte:
@@ -379,6 +379,8 @@ class Zentrale(Node):
         w['lidar_xy'] = self.lidar_xy if w['lidar'] is not None else None
         w['gier'] = self.gier
         st = self.linie_status
+        # Faehrt das Fahrprogramm wirklich? Nur dann darf die KI den Arm bewegen (nicht im TEST, nicht nach STOPP)
+        self.entscheider.fahrt_aktiv = bool(st.get('drive')) and jetzt - st.get('_zeit', 0.0) < 1.0
         w['linie'] = {'kamera': bool(st.get('linie_kamera')), 'quer': st.get('linie_quer'), 'kurs': st.get('linie_kurs'),
                       'kamera_quer': st.get('kamera_quer'), 'kamera_kurs': st.get('kamera_kurs')}
         # Hindernis fuer Aufheben/Anhalten: Tiefenkamera (sieht auch Flaches), sonst LiDAR

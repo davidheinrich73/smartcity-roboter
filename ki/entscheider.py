@@ -64,7 +64,7 @@ STANDARD = {
     'tiefe_halt': 0.35,        # Tiefenkamera sieht etwas im Weg naeher als das (m) -> stopp
     'aufheben_max_breite': 0.08,
     'aufheben_max_hoehe': 0.12,
-    'aufheben_max_quer': 0.08, # nur aufheben, was so nah an der Linie liegt (m) - am Rand steht vielleicht jemand
+    'aufheben_max_quer': 0.08,  # nur aufheben, was so nah an der Linie liegt (m) - am Rand steht vielleicht jemand
     'zebra_kein_aufheben': 3.0,  # so lange nach einem gesehenen Zebrastreifen nichts aufheben (s): Fussgaenger!
     'ausricht_abstand': 0.30,  # so weit vor dem Gegenstand seitlich ausrichten (Kamera sieht ihn noch)
     'greif_abstand': 0.20,     # Robotermitte bis Mitte Gegenstand in der Pose 'greifen' (am Roboter messen!)
@@ -78,7 +78,8 @@ class Entscheider:
     def __init__(self, cfg=None, arm_erlaubt=False, posen=None):
         self.c = dict(STANDARD)
         self.c.update(cfg or {})
-        self.arm_erlaubt = arm_erlaubt
+        self.arm_freigabe = arm_erlaubt    # Einstellung: KI darf den Arm bewegen (Panel, Seite Arm)
+        self.fahrt_aktiv = True            # faehrt das Fahrprogramm gerade? (setzt die Zentrale; TEST/aus = False)
         self.posen = posen or {}
         # Ablaeufe
         self.ablauf = None
@@ -111,13 +112,20 @@ class Entscheider:
         self.letzter_grund = None
         self.jetzt = 0.0
 
+    @property
+    def arm_erlaubt(self):
+        """Arm nur bewegen, wenn freigegeben UND das Fahrprogramm wirklich faehrt (nicht im TEST, nicht nach STOPP)."""
+        return self.arm_freigabe and self.fahrt_aktiv
+
     def kommando(self, jetzt, text):
         """Wunsch von aussen (Topic /ki/kommando). 'umschauen' = bei naechster Gelegenheit kurz anhalten
         und links/rechts schauen (fuer die Karte). Rueckgabe: Antworttext."""
         if text == 'umschauen':
             posen_da = all(self.posen.get(p) for p in ('blick_links', 'blick_rechts', 'fahrstellung'))
-            if not (self.arm_erlaubt and posen_da):
+            if not (self.arm_freigabe and posen_da):
                 return 'Umschauen geht nicht: Arm fuer die KI nicht freigegeben oder Posen fehlen'
+            if not self.fahrt_aktiv:
+                return 'Umschauen geht nur waehrend der Fahrt (START), nicht im TEST'
             self.umschauen_wunsch = jetzt
             return 'Umschauen vorgemerkt'
         return f'unbekanntes Kommando: {text}'
@@ -142,6 +150,16 @@ class Entscheider:
         """
         einsatz = szenario == 'einsatz'
         self.jetzt = jetzt
+        if not self.fahrt_aktiv:
+            # STOPP gedrueckt oder nur TEST: nichts am Arm bewegen, laufende Arm-Ablaeufe abbrechen.
+            # Der Arm bleibt, wo er ist; beim naechsten START faehrt er zuerst in die Fahrstellung.
+            if self.ablauf is not None and self.ablauf.braucht_arm:
+                self._ereignis(jetzt, f'{self.ablauf.name}: abgebrochen (Fahrprogramm aus)', 'info')
+                if self.ablauf.arm_bewegt or self.ablauf.name == 'aufheben':
+                    self.arm_zurueck_noetig = True
+                self.ablauf = None
+            if self.arm_phase is not None:
+                self._arm_abbrechen()
         neues_bild = w.get('bild_nr', -1) != self.letzte_bild_nr
         if neues_bild:
             self.letzte_bild_nr = w.get('bild_nr', -1)
@@ -162,12 +180,14 @@ class Entscheider:
         befehl = self._entscheide(jetzt, w, einsatz)
         # Arm zuerst zurueck in Fahrstellung, bevor wieder gefahren wird
         # (nicht waehrend einer Notbremse: dann ist etwas sehr nah am Roboter)
-        if self.arm_zurueck_noetig and not befehl['grund'].startswith('NOTBREMSE'):
+        if self.arm_zurueck_noetig and self.fahrt_aktiv and not befehl['grund'].startswith('NOTBREMSE'):
             self.arm_zurueck_noetig = False
             self.arm_warten_bis = jetzt + self.c['arm_zeit']
             befehl = self._b('stopp', 'Arm faehrt zurueck in Fahrstellung', arm='fahrstellung')
         elif jetzt < self.arm_warten_bis and befehl['aktion'] != 'stopp':
             befehl = self._b('stopp', 'Arm faehrt zurueck in Fahrstellung')
+        if not self.fahrt_aktiv and befehl.get('arm'):
+            befehl = dict(befehl, arm=None)    # ohne fahrendes Fahrprogramm bewegt die KI den Arm nie
         if befehl['aktion'] != self.letzte_aktion or befehl['grund'] != self.letzter_grund:
             if befehl['aktion'] != self.letzte_aktion:
                 art = befehl['aktion'] if befehl['aktion'] in ('stopp', 'langsam') else 'fahren'

@@ -22,6 +22,7 @@ def befehl(aktion, grund, arm=None, manoever=None):
 
 class Ablauf:
     name = ''
+    braucht_arm = False     # bewegt dieser Ablauf den Arm? (dann nur, solange das Fahrprogramm faehrt)
 
     def __init__(self, jetzt, c):
         self.c = c
@@ -44,6 +45,7 @@ class Zebrastreifen(Ablauf):
     def __init__(self, jetzt, c, posen, abstand=0.3):
         super().__init__(jetzt, c)
         self.mit_arm = bool(posen.get('blick_links') and posen.get('blick_rechts') and posen.get('fahrstellung'))
+        self.braucht_arm = self.mit_arm
         self.abstand = abstand      # Zebrastreifen so weit voraus (m), gemessen beim Anhalten
         self.jemand = False
         self.runde = 0
@@ -119,6 +121,7 @@ class Zebrastreifen(Ablauf):
 class Umschauen(Ablauf):
     """Kurz anhalten und mit der Kamera (Arm) nach links und rechts schauen, z. B. fuer die Karte."""
     name = 'umschauen'
+    braucht_arm = True
 
     def __init__(self, jetzt, c, grund='Umschauen'):
         super().__init__(jetzt, c)
@@ -185,6 +188,7 @@ class Wenden(Ablauf):
 class Aufheben(Ablauf):
     """Kleines Hindernis greifen und neben die Strasse legen. Posen: greifen, greifen_hoch, ablegen."""
     name = 'aufheben'
+    braucht_arm = True
 
     def __init__(self, jetzt, c, objekt):
         super().__init__(jetzt, c)

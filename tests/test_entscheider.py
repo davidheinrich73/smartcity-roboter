@@ -233,6 +233,32 @@ ok = b['aktion'] == 'stopp' and l.e.ablauf is None
 fehler += not ok
 print(f"{'OK  ' if ok else 'FEHLER'} kurz nach Zebrastreifen -> nichts aufheben (Fussgaenger!): {b['grund']}")
 
+# ---------------- STOPP / TEST: KI bewegt den Arm nie ----------------
+l = Lauf(arm_erlaubt=True, posen=POSEN)
+mittig = dict(WUERFEL, seite=0.0, vor=0.30)
+l.schritt(1, objekt=mittig)
+arme, b = arm_befehle(l, 60, objekt=mittig)       # ausrichten, heranfahren, Greifer auf
+ok_vorher = 'greifen' in arme
+l.e.fahrt_aktiv = False                          # STOPP gedrueckt
+arme, b = arm_befehle(l, 60, objekt=mittig)
+ok = ok_vorher and arme == [] and l.e.ablauf is None
+fehler += not ok
+print(f"{'OK  ' if ok else 'FEHLER'} STOPP waehrend Aufheben: Ablauf abgebrochen, kein Arm-Befehl mehr ({b['grund']})")
+l.e.fahrt_aktiv = True                           # wieder START
+b = l.schritt(1)
+ok = b['arm'] == 'fahrstellung'
+fehler += not ok
+print(f"{'OK  ' if ok else 'FEHLER'} nach neuem START faehrt der Arm zuerst in die Fahrstellung: {b['grund']}")
+l = Lauf(arm_erlaubt=True, posen=POSEN)
+l.e.fahrt_aktiv = False                          # nur TEST
+arme, b = arm_befehle(l, 80, zebra={'abstand': 0.3})
+ok = arme == [] and b['aktion'] == 'stopp' or arme == []
+fehler += not ok
+print(f"{'OK  ' if ok else 'FEHLER'} TEST-Modus am Zebrastreifen: kein Arm ({b['grund']})")
+ok = 'nur waehrend der Fahrt' in l.e.kommando(l.t, 'umschauen')
+fehler += not ok
+print(f"{'OK  ' if ok else 'FEHLER'} Umschauen im TEST-Modus abgelehnt")
+
 print()
 print('Alle Tests bestanden.' if not fehler else f'{fehler} Test(s) fehlgeschlagen.')
 sys.exit(1 if fehler else 0)
