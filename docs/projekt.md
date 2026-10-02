@@ -3,7 +3,7 @@
 **Team Autonomes Fahren, BBS Trier · Stand: 02.10.2026**
 Repository: https://github.com/davidheinrich73/smartcity-roboter
 
-Diese Datei erklärt, was wir gebaut haben und wie es funktioniert. Sie ist so geschrieben, dass man sie der FISI-Klasse vortragen kann. Technische Details stehen in den anderen Dateien in `docs/`.
+Diese Datei erklärt, was wir gebaut haben und wie es funktioniert.  Technische Details stehen in den anderen Dateien in `docs/`.
 
 ---
 
@@ -127,7 +127,7 @@ Das Panel ist eine Webseite, die auf dem Roboter läuft. Man öffnet sie mit ein
 | Arm | Servos einzeln bewegen, Stellungen („Posen“) speichern |
 | Sensoren / System | Akku, Sensoren mit Messrate, IP-Adresse, Update |
 
-**Technik dahinter (FISI-Teil):**
+**Technik dahinter:**
 - Das Panel ist ein kleiner **HTTP-Server in Python** (nur Standardbibliothek). Die Seite ist **HTML + JavaScript** ohne Internet-Abhängigkeit.
 - Die Seite fragt den Status 2–3× pro Sekunde als **JSON** ab (`/api/status`).
 - **Kamerabilder:** Das nächste Bild wird erst geholt, wenn das vorige angekommen ist (Pull statt Stream). Ein Videostrom würde sich im WLAN aufstauen.
@@ -178,6 +178,7 @@ Die Simulation nutzt eine eigene **Domain-ID** (77). Das ist die Kanalnummer, au
 - **Wegwahl**: zufällig, aber abwechslungsreich. Später **„fahr zu X“** (Ziel ansteuern).
 - **Abblendlicht** an der vorderen LED-Leiste und **Blinker** beim Abbiegen.
 - **MQTT**: Daten für die Leitzentrale veröffentlichen (laut Zieldefinition).
+- **VLAN**: VLAN Architektur steht (vermutlich), muss noch auf den Robotern konfiguriert werden
 
 **Später:**
 - **Objekte wegräumen**: Die Bewegungsabläufe des Arms sollen von der KI **selbst erlernt** werden, statt wie bisher fest vorprogrammiert zu sein.
