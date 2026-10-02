@@ -10,9 +10,12 @@
 #   ACHTUNG: Mit Laptop-Zugriff kann jeder im Netz, der die Adresse kennt, den Roboter starten.
 #
 # Was das Panel tut:
+#   Dashboard        -> alles auf einer Seite: Karte (2D/3D), Kamera, LiDAR, Knoepfe, Ereignisse
+#                       (einzelne Seiten fuer Karte, Kamera, LiDAR, Arm, Sensoren, System)
 #   START/TEST/STOPP -> startet/beendet den Linienfolger (KI-Zentrale muss laufen)
 #   STOPP            -> sendet sofort Stillstand an /cmd_vel UND beendet den Linienfolger
 #   Ansichten        -> KI-Sicht, Linie, LiDAR, Tiefe (Bild fuer Bild, ohne Stau)
+#   Karte            -> startet den Kartografen mit der KI (kartograf/kartograf.py), zeigt seine Dateien
 #   Arm              -> nur auf Knopfdruck, nie waehrend der Fahrt
 import argparse
 import json
@@ -66,6 +69,14 @@ SENSOREN = [
     ('Kamera Tiefe', '/camera/depth/camera_info', 5),
     ('Gamepad', '/joy', None),
 ]
+# Dateien des Kartografen, die das Panel ausliefert: Adresse -> (Datei, Typ, als Download)
+KARTEN_DATEIEN = {
+    '/karte/bild.png': ('karte.png', 'image/png', False),
+    '/karte/info.json': ('karte.json', 'application/json', False),
+    '/karte/wolke.bin': ('wolke.bin', 'application/octet-stream', False),
+    '/karte/export.png': ('karte.png', 'image/png', True),
+    '/karte/export.ply': ('karte.ply', 'application/octet-stream', True),
+}
 # Akku: 3 Li-Ion-Zellen (voll ca. 12,6 V). Prozent ist nur eine grobe SCHAETZUNG.
 AKKU_VOLL, AKKU_LEER, AKKU_WARNUNG = 12.6, 10.5, 11.0
 
@@ -154,11 +165,15 @@ class PanelNode(Node):
 
         self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
         self.szenario_pub = self.create_publisher(String, '/ki/szenario', 10)
+        self.ki_kommando_pub = self.create_publisher(String, '/ki/kommando', 10)
+        self.karte_kommando_pub = self.create_publisher(String, '/karte/kommando', 10)
         self.tempo_pub = self.create_publisher(Float32, '/line_follower/tempo', 10)
         sub = self.create_subscription
         sub(String, '/line_follower/status', lambda m: self._json('lf', m), 10)
         sub(String, '/ki/befehl', lambda m: self._json('ki', m), 10)
         sub(String, '/ki/ereignis', self._ereignis, 50)
+        sub(String, '/karte/pose', lambda m: self._json('karte', m), 10)
+        sub(String, '/ki/antwort', lambda m: self._set('ki_antwort', m.data), 10)
         sub(CompressedImage, '/line_follower/bild/compressed', lambda m: self._set('bild_lf', bytes(m.data)), 1)
         sub(CompressedImage, '/ki/bild/compressed', lambda m: self._set('bild_ki', bytes(m.data)), 1)
         for t in self.scan_topics:
@@ -343,11 +358,18 @@ def mache_handler(node, prozesse, beenden=None):
     zustand = {'tempo': 0.15}
 
     def ki_starten():
+        # Kartograf gehoert dazu: baut bei jeder Fahrt die Karte weiter (faehrt nicht, bewegt keinen Arm)
+        karte_starten()
         return prozesse.start('ki', [sys.executable, os.path.join(REPO, 'ki', 'zentrale.py'), '--ros-args']
                               + einstellungen.ros_argumente())
 
+    def karte_starten():
+        befehl = [sys.executable, os.path.join(REPO, 'kartograf', 'kartograf.py'), '--ros-args']
+        return prozesse.start('karte', befehl + einstellungen.ros_argumente() + ['-p', f'karte:={node.args.karte}'])
+
     def lf_befehl(drive):
-        return [sys.executable, os.path.join(REPO, 'line_follower', 'line_follower.py'), '--ros-args'] + einstellungen.ros_argumente() + [
+        befehl = [sys.executable, os.path.join(REPO, 'line_follower', 'line_follower.py'), '--ros-args']
+        return befehl + einstellungen.ros_argumente() + [
             '-p', f'drive:={"true" if drive else "false"}', '-p', 'show:=false', '-p', f"speed:={zustand['tempo']}"]
 
     def aktion(name, daten, lokal):
@@ -388,6 +410,22 @@ def mache_handler(node, prozesse, beenden=None):
         if name == 'ki_stopp':
             prozesse.stopp('ki')
             return 'KI gestoppt (Fahrprogramm haelt dann an)'
+        # ---- Karte ----
+        if name == 'karte_start':
+            return 'Kartograf wird gestartet' if karte_starten() else 'Kartograf laeuft schon'
+        if name == 'karte_stopp':
+            prozesse.stopp('karte', warte=8.0)   # speichert beim Beenden
+            return 'Kartograf gestoppt, Karte gespeichert'
+        if name == 'karte_speichern':
+            node.karte_kommando_pub.publish(String(data='speichern'))
+            return 'Karte wird gespeichert'
+        if name == 'karte_neu':
+            node.karte_kommando_pub.publish(String(data='neu'))
+            return 'Neue Karte angefangen. Die alte liegt als Sicherung in karten/ (nichts geloescht).'
+        if name == 'umschauen':
+            node.ki_kommando_pub.publish(String(data='umschauen'))
+            time.sleep(0.5)
+            return 'KI: ' + (node.get('ki_antwort', max_alter=2.0) or 'keine Antwort (laeuft die KI?)')
         # ---- Arm ----
         if name.startswith('arm_'):
             if prozesse.laeuft('fahren') and name in ('arm_pose', 'arm_greifer'):
@@ -464,9 +502,11 @@ def mache_handler(node, prozesse, beenden=None):
             'ips': ip_adressen(), 'port': node.args.port, 'netz_erlaubt': node.netz_erlaubt, 'lokal': lokal,
             'roboter': open(os.path.expanduser('~/roboter_name')).read().strip()
             if os.path.exists(os.path.expanduser('~/roboter_name')) else '',
+            'karte': node.get('karte', max_alter=2.0), 'kartograf': prozesse.laeuft('karte'),
             'arm': {'grenzen': armlib.GRENZEN, 'namen': armlib.NAMEN, 'posen': posen,
                     'letzte': node.arm.letzte if node.arm else None,
-                    'ki_darf': bool(armlib.lade_einstellungen().get('ki_darf_arm_bewegen'))},
+                    'ki_darf': bool(armlib.lade_einstellungen().get('ki_darf_arm_bewegen')),
+                    'gespeichert': sorted(k for k, v in (armlib.lade_einstellungen().get('posen') or {}).items() if v)},
         }
 
     class Handler(BaseHTTPRequestHandler):
@@ -511,6 +551,20 @@ def mache_handler(node, prozesse, beenden=None):
                     self._senden(200, 'image/jpeg', b)
                 elif pfad == '/bild/tiefe.jpg':
                     self._senden(200, 'image/jpeg', node.jpeg_tiefe())
+                elif pfad in KARTEN_DATEIEN:
+                    datei, typ, herunterladen = KARTEN_DATEIEN[pfad]
+                    try:
+                        with open(os.path.join(REPO, 'karten', node.args.karte, datei), 'rb') as f:
+                            inhalt = f.read()
+                    except FileNotFoundError:
+                        return self._senden(404, 'text/plain', b'Noch keine Karte')
+                    self.send_response(200)
+                    self.send_header('Content-Type', typ)
+                    self.send_header('Cache-Control', 'no-store')
+                    if herunterladen:
+                        self.send_header('Content-Disposition', f'attachment; filename="{node.args.karte}_{datei}"')
+                    self.end_headers()
+                    self.wfile.write(inhalt)
                 else:
                     self._senden(404, 'text/plain', b'Nicht gefunden')
             except (BrokenPipeError, ConnectionResetError):
@@ -541,6 +595,7 @@ def main():
     ap.add_argument('--netz', action='store_true', help='Laptop-Zugriff gleich beim Start erlauben (Vorsicht!)')
     ap.add_argument('--tiefe-topic', default='/camera/depth/image_raw')
     ap.add_argument('--autostart', action='store_true', help='Kamera und KI-Zentrale beim Start mitstarten')
+    ap.add_argument('--karte', default='smartcity', help='Name der Karte (Ordner karten/<name>)')
     args, _ = ap.parse_known_args()
 
     rclpy.init()

@@ -98,6 +98,7 @@ class Kartograf(Node):
         self.ki = (0.0, {})
         self.gefahren, self.umschauen_bei = 0.0, 0.0
         self.suche_laeuft = False
+        self.scan_karte = None
         self.geaendert = True
         self.laeuft = True
 
@@ -185,6 +186,9 @@ class Kartograf(Node):
         with self.lock:
             vorher = self.lok.pose
             self.lok.scan(punkte, jetzt, eintragen=abs(self.dreh) < 0.5)
+            if self.lok.pose is not None:   # Scan in Kartenkoordinaten fuer die Anzeige (passt so immer zur Karte)
+                auswahl = punkte[np.linspace(0, len(punkte) - 1, min(len(punkte), 180)).astype(int)]
+                self.scan_karte = np.round(K.in_karte(self.lok.pose, auswahl), 3).tolist()
             if vorher is None and self.lok.pose is not None:
                 self.get_logger().info(f'Karte: {self.lok.status}')
             suchen = self.lok.pose is None and len(self.lok.puffer) >= 3 and not self.suche_laeuft
@@ -274,7 +278,7 @@ class Kartograf(Node):
                 x, y = K.in_karte(pose, [[0.45, -0.12]])[0]
                 m.melden(art, x, y, fahrt=fahrt)
         o = ki.get('objekt')
-        if o and o.get('vor') is not None:
+        if o and o.get('quelle') == 'tiefe' and o.get('vor') is not None:   # Dinge AUF der Strasse (Tiefenkamera)
             x, y = K.in_karte(pose, [[o['vor'] + o.get('breite', 0.04) / 2, o.get('seite', 0.0)]])[0]
             m.melden('hindernis', x, y, fahrt=fahrt)
 
@@ -305,7 +309,7 @@ class Kartograf(Node):
         aus = {'zeit': time.time(), 'status': status, 'guete': round(guete, 2), 'fahrten': fahrten,
                'karte': self.p('karte')}
         if pose is not None:
-            aus.update({'x': round(pose[0], 3), 'y': round(pose[1], 3), 'w': round(pose[2], 3)})
+            aus.update({'x': round(pose[0], 3), 'y': round(pose[1], 3), 'w': round(pose[2], 3), 'scan': self.scan_karte})
         self.pub_pose.publish(String(data=json.dumps(aus)))
 
     def _dateien_schreiben(self):
