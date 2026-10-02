@@ -4,7 +4,8 @@
 # Aufruf: scripts/simulation.sh pruefen     (setzt eine eigene ROS_DOMAIN_ID, NICHT 30)
 #   SIM_DAUER=150        so viele Sekunden fahren
 #   SIM_SZENARIO=einsatz RTW-Einsatz (ueber Rot, Stoppschild auslassen)
-#   SIM_KARTE=1          Kartograf mitlaufen lassen und die Karte pruefen
+#   SIM_KARTE_ORDNER=... Kartenordner (Standard: neu in den Logs). Zweimal mit demselben Ordner
+#                        starten -> prueft, ob der Roboter sich in der vorhandenen Karte wiederfindet.
 import json
 import math
 import os
@@ -13,16 +14,20 @@ import subprocess
 import sys
 import time
 
+import numpy as np
 import rclpy
 from std_msgs.msg import String
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, os.path.join(REPO, 'sim'))
 from welt import Welt  # noqa: E402
+sys.path.insert(0, os.path.join(REPO, 'lib'))
+import karte as K      # noqa: E402
 
 DAUER = float(os.environ.get('SIM_DAUER', 150))
 SZENARIO = os.environ.get('SIM_SZENARIO', 'normal')   # normal | einsatz
 LOGS = os.environ.get('SIM_LOGS', '/tmp')
+KARTEN = os.environ.get('SIM_KARTE_ORDNER', os.path.join(LOGS, 'sim_karten'))
 
 
 def starte(befehl, name, env):
@@ -41,13 +46,16 @@ def main():
         starte([sys.executable, os.path.join(REPO, 'ki', 'zentrale.py'), '--ros-args'] + cfg, 'ki', env),
         starte([sys.executable, os.path.join(REPO, 'line_follower', 'line_follower.py'), '--ros-args'] + cfg +
                ['-p', 'drive:=true', '-p', 'show:=false'], 'linienfolger', env),
+        starte([sys.executable, os.path.join(REPO, 'kartograf', 'kartograf.py'), '--ros-args'] + cfg +
+               ['-p', f'ordner:={KARTEN}'], 'kartograf', env),
     ]
     rclpy.init()
     node = rclpy.create_node('sim_pruefer')
-    zustaende, ereignisse, befehle = [], [], []
+    zustaende, ereignisse, befehle, karte = [], [], [], []
     node.create_subscription(String, '/sim/zustand', lambda m: zustaende.append(json.loads(m.data)), 50)
     node.create_subscription(String, '/ki/ereignis', lambda m: ereignisse.append(json.loads(m.data)), 50)
     node.create_subscription(String, '/ki/befehl', lambda m: befehle.append(json.loads(m.data)), 50)
+    node.create_subscription(String, '/karte/pose', lambda m: karte.append(json.loads(m.data)), 50)
     pub = node.create_publisher(String, '/ki/szenario', 10)
     node.create_timer(1.0, lambda: pub.publish(String(data=SZENARIO)))
     print(f'Simulation laeuft {DAUER:.0f} s, Szenario {SZENARIO} ... (Logs: {LOGS}/sim_*.log)')
@@ -69,11 +77,11 @@ def main():
         node.destroy_node()
         rclpy.shutdown()
     with open(os.path.join(LOGS, 'sim_verlauf.json'), 'w') as f:   # zum Nachschauen
-        json.dump({'zustaende': zustaende, 'ereignisse': ereignisse, 'befehle': befehle[::5]}, f)
-    return auswerten(zustaende, ereignisse)
+        json.dump({'zustaende': zustaende, 'ereignisse': ereignisse, 'befehle': befehle[::5], 'karte': karte}, f)
+    return auswerten(zustaende, ereignisse, karte)
 
 
-def auswerten(zustaende, ereignisse):
+def auswerten(zustaende, ereignisse, karte=()):
     if not zustaende:
         print(f'FEHLER: keine Daten vom Simulator. Logs: {LOGS}/sim_*.log')
         return 1
@@ -185,14 +193,36 @@ def auswerten(zustaende, ereignisse):
     else:
         check('Einbahnstrasse erreicht', False, '(Simulation zu kurz?)')
 
-    # Kartograf (falls er lief)
-    if os.environ.get('SIM_KARTE'):
-        try:
-            with open(os.path.join(LOGS, 'sim_karte.json')) as f:
-                k = json.load(f)
-            check('Karte: Position genau', k['fehler_pos'] < 0.10, f"(Fehler {k['fehler_pos'] * 100:.0f} cm)")
-        except (OSError, ValueError, KeyError):
-            check('Karte: Auswertung', False, '(keine Daten)')
+    # Kartograf: stimmt seine Position? (Karten-System = Startpunkt der ersten Fahrt = Start im Simulator)
+    start = welt.pose_bei(0.0)
+    zeiten = np.array([z['zeit'] for z in zustaende])
+    fehler_k = []
+    for k in karte:
+        if 'x' not in k:
+            continue
+        z = zustaende[int(np.argmin(np.abs(zeiten - k['zeit'])))]
+        wahr = K.relativ(start, (z['x'], z['y'], z['w']))
+        fehler_k.append((math.hypot(k['x'] - wahr[0], k['y'] - wahr[1]), abs(K.winkel(k['w'] - wahr[2]))))
+    if fehler_k:
+        f = np.array(fehler_k)
+        check('Karte: Position des Roboters stimmt', f[:, 0].max() < 0.10,
+              f'(max {f[:, 0].max() * 100:.1f} cm / {math.degrees(f[:, 1].max()):.1f} Grad, '
+              f'Mittel {f[:, 0].mean() * 100:.1f} cm, Fahrt {karte[-1].get("fahrten")}, {karte[-1].get("status")})')
+    else:
+        check('Karte: Kartograf meldet eine Position', False, f"({karte[-1]['status'] if karte else 'keine Meldung'})")
+    datei = os.path.join(KARTEN, 'smartcity', 'karte.json')
+    try:
+        with open(datei) as f:
+            info = json.load(f)
+        marker = ', '.join(f"{m['name']} ({m['anzahl']}x)" for m in info['marker'])
+        check('Karte: Dateien geschrieben (karte.png, wolke.bin, karte.json)',
+              all(os.path.exists(os.path.join(KARTEN, 'smartcity', d)) for d in ('karte.png', 'wolke.bin')),
+              f"({info['punkte_3d']} 3D-Punkte, Marker: {marker or 'keine'})")
+        arten = {m['art'] for m in info['marker']}
+        check('Karte: KI-Marker fuer Ampel, Zebrastreifen, Stoppschild', {'ampel', 'zebra', 'stoppschild'} <= arten,
+              f'({sorted(arten)})')
+    except (OSError, ValueError, KeyError) as e:
+        check('Karte: Dateien', False, f'({e})')
 
     print('\nAlles in Ordnung.' if not fehler else f'\n{fehler} Pruefung(en) fehlgeschlagen. Logs: {LOGS}/sim_*.log')
     return 1 if fehler else 0
