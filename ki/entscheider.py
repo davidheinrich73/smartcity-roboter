@@ -26,7 +26,7 @@
 # Im Szenario "einsatz" (RTW) werden 7 und 8 uebergangen, alles andere gilt weiter.
 # Mehrschrittige Ablaeufe (Zebrastreifen, Wenden, Aufheben) stehen in ki/ablaeufe.py.
 
-from ablaeufe import Zebrastreifen, Wenden, Aufheben, LEBEWESEN
+from ablaeufe import Zebrastreifen, Wenden, Aufheben, Umschauen, LEBEWESEN
 
 FAHRZEUGE = {'Auto', 'Bus', 'LKW', 'Motorrad', 'Fahrrad', 'Zug'}
 
@@ -82,6 +82,7 @@ class Entscheider:
         self.zebra_gesperrt, self.zebra_zuletzt = False, 0.0
         self.einfahrt_n, self.einfahrt_gesperrt_bis = 0, 0.0
         self.aufheben_gesperrt, self.weg_frei_seit = False, None
+        self.umschauen_wunsch = None  # Zeit, zu der jemand (Kartograf/Panel) Umschauen gewuenscht hat
         self.ereignisse = []          # (zeit, text, art) art: stopp | fahren | info
         self.letzte_bild_nr = -1
         # Ampel
@@ -106,6 +107,17 @@ class Entscheider:
         self.letzte_aktion = None
         self.letzter_grund = None
         self.jetzt = 0.0
+
+    def kommando(self, jetzt, text):
+        """Wunsch von aussen (Topic /ki/kommando). 'umschauen' = bei naechster Gelegenheit kurz anhalten
+        und links/rechts schauen (fuer die Karte). Rueckgabe: Antworttext."""
+        if text == 'umschauen':
+            posen_da = all(self.posen.get(p) for p in ('blick_links', 'blick_rechts', 'fahrstellung'))
+            if not (self.arm_erlaubt and posen_da):
+                return 'Umschauen geht nicht: Arm fuer die KI nicht freigegeben oder Posen fehlen'
+            self.umschauen_wunsch = jetzt
+            return 'Umschauen vorgemerkt'
+        return f'unbekanntes Kommando: {text}'
 
     def _ereignis(self, jetzt, text, art='info'):
         self.ereignisse.append((jetzt, text, art))
@@ -305,6 +317,14 @@ class Entscheider:
             self._ereignis(jetzt, f"Zebrastreifen {z['abstand'] * 100:.0f} cm voraus -> anhalten, umschauen", 'stopp')
             posen = self.posen if self.arm_erlaubt else {}
             return self._ablauf_start(jetzt, Zebrastreifen(jetzt, c, posen, z['abstand']))
+        # Umschauen (Wunsch von Kartograf/Panel): nur wenn sonst nichts los ist, Wunsch gilt 20 s
+        if self.umschauen_wunsch is not None:
+            if jetzt - self.umschauen_wunsch < 20.0 and not self.ampel_halt and jetzt >= self.schild_bis:
+                self.umschauen_wunsch = None
+                self._ereignis(jetzt, 'Schaue mich fuer die Karte um', 'info')
+                return self._ablauf_start(jetzt, Umschauen(jetzt, c, 'Umschauen fuer die Karte'))
+            if jetzt - self.umschauen_wunsch >= 20.0:
+                self.umschauen_wunsch = None
         # 5./6. Verkehrsregeln
         if self.ampel_halt:
             if einsatz:

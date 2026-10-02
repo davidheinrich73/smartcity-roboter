@@ -209,6 +209,19 @@ pruefe('zu breit (20 cm) -> warten statt greifen', l.schritt(3, objekt=dict(WUER
 l = Lauf(arm_erlaubt=False, posen=POSEN)
 pruefe('ohne Arm-Freigabe -> warten', l.schritt(3, objekt=WUERFEL), 'stopp')
 
+# ---------------- Umschauen fuer die Karte ----------------
+l = Lauf(arm_erlaubt=True, posen=POSEN)
+l.schritt(2)
+print('     ', l.e.kommando(l.t, 'umschauen'))
+arme, b = arm_befehle(l, 90)
+ok = arme == ['blick_links', 'blick_rechts', 'fahrstellung'] and b['aktion'] == 'fahren'
+fehler += not ok
+print(f"{'OK  ' if ok else 'FEHLER'} Umschauen auf Wunsch: {arme}, danach {b['aktion']}")
+l = Lauf()
+ok = 'geht nicht' in l.e.kommando(l.t, 'umschauen')
+fehler += not ok
+print(f"{'OK  ' if ok else 'FEHLER'} Umschauen ohne Arm-Freigabe wird abgelehnt")
+
 print()
 print('Alle Tests bestanden.' if not fehler else f'{fehler} Test(s) fehlgeschlagen.')
 sys.exit(1 if fehler else 0)

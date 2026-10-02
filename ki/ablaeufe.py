@@ -116,6 +116,35 @@ class Zebrastreifen(Ablauf):
         return None
 
 
+class Umschauen(Ablauf):
+    """Kurz anhalten und mit der Kamera (Arm) nach links und rechts schauen, z. B. fuer die Karte."""
+    name = 'umschauen'
+
+    def __init__(self, jetzt, c, grund='Umschauen'):
+        super().__init__(jetzt, c)
+        self.grund = grund
+        self._phase(jetzt, 'halt')
+
+    def schritt(self, jetzt, w):
+        c, d = self.c, self.dauer(jetzt)
+        schauen = c['arm_zeit'] + c['zebra_schauen']
+        # Phase: (so lange, was gerade passiert, naechste Phase, Arm dafuer)
+        folge = {'halt': (0.5, 'anhalten', 'links', {'pose': 'blick_links'}),
+                 'links': (schauen, 'schaue nach links', 'rechts', {'pose': 'blick_rechts'}),
+                 'rechts': (schauen, 'schaue nach rechts', 'mitte', {'pose': 'fahrstellung'}),
+                 'mitte': (c['arm_zeit'], 'Kamera zurueck', None, None)}
+        warte, text, naechste, arm = folge[self.phase]
+        if d < warte:
+            return befehl('stopp', f'{self.grund}: {text}')
+        if naechste is None:
+            self.arm_bewegt = False
+            self.ergebnis = 'ok'
+            return None
+        self.arm_bewegt = True
+        self._phase(jetzt, naechste)
+        return befehl('stopp', f'{self.grund}: {folge[naechste][1]}', arm=arm)
+
+
 class Wenden(Ablauf):
     """Auf der Stelle umdrehen (Einbahnstrasse von der falschen Seite), bis die Linie wieder vorne ist."""
     name = 'wenden'
@@ -136,6 +165,7 @@ class Wenden(Ablauf):
         # Linie wieder vorne: Roboter steht auf ihr und schaut (fast) in ihre Richtung.
         # Zuerst nach dem Linien-Gedaechtnis (kennt auch das Stueck direkt unter/hinter dem Roboter),
         # sonst nach dem Kamerabild.
+
         def passt(quer, kurs):
             return quer is not None and kurs is not None and abs(quer) < 0.06 and abs(kurs) < math.radians(20)
         linie_vorne = passt(linie.get('quer'), linie.get('kurs')) or (

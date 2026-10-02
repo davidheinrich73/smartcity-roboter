@@ -121,3 +121,48 @@ class Arm:
         self.pub.publish(msg)
         self.letzte = winkel
         return None
+
+
+class ArmBeobachter:
+    """Hoert mit, wohin der Arm zuletzt geschickt wurde - egal von wem (KI, Panel, Gamepad).
+    Damit wissen KI und Kartograf, wohin die Kamera (am Arm) gerade schaut."""
+
+    def __init__(self, node):
+        self.winkel, self.zeit, self.dauer = None, 0.0, 0.0
+        from std_msgs.msg import String
+        try:
+            from rosidl_runtime_py.utilities import get_message
+            typ = get_message('arm_msgs/msg/ArmJoints')
+            node.create_subscription(typ, '/arm6_joints', self._echt, 10)
+        except Exception:
+            pass   # kein arm_msgs (Simulation)
+        node.create_subscription(String, '/arm6_joints_sim', self._sim, 10)
+
+    def _neu(self, winkel, dauer_ms):
+        import time
+        self.winkel, self.zeit, self.dauer = [float(w) for w in winkel], time.time(), float(dauer_ms) / 1000.0
+
+    def _echt(self, m):
+        self._neu([m.joint1, m.joint2, m.joint3, m.joint4, m.joint5, m.joint6], m.time)
+
+    def _sim(self, m):
+        import re
+        t = re.match(r'\[([^\]]*)\]\s*(\d+)?', m.data)
+        if t:
+            self._neu([float(w) for w in t.group(1).split(',')], int(t.group(2) or 1000))
+
+    def kamera(self, posen, jetzt):
+        """(in_fahrstellung, gier_grad). gier_grad = Drehung von Servo 1 gegenueber der Fahrstellung,
+        None = Kamera schaut irgendwohin (Arm bewegt sich oder andere Servos verstellt).
+        Ohne Meldung seit dem Start: Fahrstellung angenommen (so startet der Roboter)."""
+        fahr = posen.get('fahrstellung')
+        if self.winkel is None or not fahr:
+            return True, 0.0
+        if jetzt - self.zeit < self.dauer + 0.3:
+            return False, None                       # Arm faehrt noch
+        gleich = [abs(self.winkel[i] - fahr[i]) <= 3 for i in range(5)]   # Greifer (6) egal
+        if all(gleich):
+            return True, 0.0
+        if all(gleich[1:]):
+            return False, self.winkel[0] - fahr[0]
+        return False, None
